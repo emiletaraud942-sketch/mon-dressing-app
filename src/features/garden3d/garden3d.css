@@ -1,0 +1,278 @@
+/* Vue 3D du jardin — classes préfixées g3d- */
+.g3d-root {
+  --g3d-surface: var(--surface, #fffdf8);
+  --g3d-text: var(--text, #22301f);
+  --g3d-muted: var(--muted, #66705f);
+  --g3d-accent: var(--accent, #2f5d3a);
+  --g3d-border: var(--border, #ddd5c3);
+  --g3d-radius: var(--radius, 12px);
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-height: 240px;
+  overflow: hidden;
+  background: #9cc3e4;
+  color: var(--g3d-text);
+  font-size: 14px;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.g3d-canvas {
+  position: absolute !important;
+  inset: 0;
+  touch-action: none;
+}
+
+.g3d-error {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  text-align: center;
+  background: var(--g3d-surface);
+  color: var(--g3d-muted);
+}
+
+/* ----- Overlay ----- */
+.g3d-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px;
+  pointer-events: none;
+}
+.g3d-overlay > * {
+  pointer-events: none;
+}
+.g3d-chip,
+.g3d-panel,
+.g3d-btn,
+.g3d-compass {
+  pointer-events: auto;
+}
+
+.g3d-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.g3d-chip {
+  background: color-mix(in srgb, var(--g3d-surface) 90%, transparent);
+  border: 1px solid var(--g3d-border);
+  border-radius: var(--g3d-radius);
+  box-shadow: 0 2px 10px rgb(0 0 0 / 12%);
+  padding: 6px 10px;
+  line-height: 1.3;
+  backdrop-filter: blur(6px);
+}
+
+.g3d-info {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.g3d-info strong {
+  font-weight: 650;
+}
+.g3d-sun {
+  color: var(--g3d-muted);
+  font-size: 12.5px;
+}
+
+.g3d-hint {
+  pointer-events: none;
+  align-self: center;
+  font-weight: 600;
+  color: var(--g3d-accent);
+  text-align: center;
+}
+
+.g3d-tools {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+}
+
+.g3d-compass {
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--g3d-surface) 90%, transparent);
+  border: 1px solid var(--g3d-border);
+  box-shadow: 0 2px 10px rgb(0 0 0 / 12%);
+  color: var(--g3d-text);
+}
+.g3d-compass-needle {
+  width: 40px;
+  height: 40px;
+  transform-origin: 50% 50%;
+}
+
+.g3d-btn {
+  min-height: 40px;
+  min-width: 40px;
+  padding: 0 12px;
+  border-radius: var(--g3d-radius);
+  border: 1px solid var(--g3d-border);
+  background: color-mix(in srgb, var(--g3d-surface) 92%, transparent);
+  color: var(--g3d-text);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: 0 2px 10px rgb(0 0 0 / 10%);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  white-space: nowrap;
+}
+.g3d-btn:focus-visible {
+  outline: 2px solid var(--g3d-accent);
+  outline-offset: 2px;
+}
+.g3d-btn[aria-pressed='true'] {
+  background: var(--g3d-accent);
+  border-color: var(--g3d-accent);
+  color: var(--g3d-surface);
+}
+.g3d-btn--icon {
+  padding: 0;
+  width: 40px;
+  flex: none;
+}
+.g3d-btn--small {
+  padding: 0 8px;
+  font-size: 12.5px;
+  box-shadow: none;
+}
+
+/* ----- Bas : légende + panneau ----- */
+.g3d-bottom {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+}
+
+.g3d-legend {
+  align-self: flex-start;
+  display: grid;
+  gap: 3px;
+  min-width: 160px;
+  font-size: 12px;
+}
+.g3d-legend-title {
+  font-weight: 600;
+}
+.g3d-legend-bar {
+  display: block;
+  height: 10px;
+  border-radius: 5px;
+}
+.g3d-legend-scale {
+  display: flex;
+  justify-content: space-between;
+  color: var(--g3d-muted);
+}
+
+.g3d-panel {
+  background: color-mix(in srgb, var(--g3d-surface) 92%, transparent);
+  border: 1px solid var(--g3d-border);
+  border-radius: var(--g3d-radius);
+  box-shadow: 0 2px 14px rgb(0 0 0 / 14%);
+  backdrop-filter: blur(6px);
+  padding: 6px 10px;
+  display: grid;
+  gap: 2px;
+  max-width: 720px;
+  width: 100%;
+  margin: 0 auto;
+}
+
+.g3d-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.g3d-field {
+  flex: 1 1 180px;
+  min-width: 0;
+  display: grid;
+  gap: 0;
+}
+.g3d-field-label {
+  font-size: 12px;
+  color: var(--g3d-muted);
+}
+.g3d-field-label b {
+  color: var(--g3d-text);
+  font-weight: 650;
+  margin-left: 4px;
+}
+.g3d-field input[type='range'] {
+  width: 100%;
+  height: 32px;
+  margin: 0;
+  accent-color: var(--g3d-accent);
+  cursor: pointer;
+  touch-action: pan-y;
+}
+
+.g3d-shortcuts {
+  display: flex;
+  gap: 4px;
+  flex: none;
+}
+
+/* ----- Étiquettes des plantes (drei Html) ----- */
+.g3d-label {
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: rgb(20 28 18 / 78%);
+  color: #fff;
+  font: 600 12px/1.3 system-ui, sans-serif;
+  white-space: nowrap;
+  pointer-events: none;
+  transform: translateY(-50%);
+}
+.g3d-label--selected {
+  background: #ffd84d;
+  color: #2a2a12;
+}
+
+@media (max-width: 480px) {
+  .g3d-root {
+    font-size: 13px;
+  }
+  .g3d-overlay {
+    padding: 6px;
+  }
+  .g3d-panel {
+    padding: 4px 8px;
+  }
+  .g3d-row {
+    gap: 6px;
+  }
+  .g3d-shortcuts {
+    width: 100%;
+  }
+  .g3d-shortcuts .g3d-btn {
+    flex: 1;
+  }
+  .g3d-btn {
+    padding: 0 10px;
+  }
+}

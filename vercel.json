@@ -1,0 +1,10 @@
+{
+  "framework": "vite",
+  "rewrites": [
+    { "source": "/ext/geopf/:path*", "destination": "https://data.geopf.fr/:path*" },
+    { "source": "/ext/apicarto/:path*", "destination": "https://apicarto.ign.fr/:path*" },
+    { "source": "/ext/meteo-archive/:path*", "destination": "https://archive-api.open-meteo.com/:path*" },
+    { "source": "/ext/meteo/:path*", "destination": "https://api.open-meteo.com/:path*" },
+    { "source": "/((?!api/|ext/|assets/|.*\\.).*)", "destination": "/index.html" }
+  ]
+}
