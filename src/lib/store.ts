@@ -1,5 +1,5 @@
 import { get, set } from 'idb-keyval'
-import { useSyncExternalStore } from 'react'
+import { useMemo, useSyncExternalStore } from 'react'
 import type { Garden, Plant, TaskDone } from '../types'
 
 export interface AppState {
@@ -66,7 +66,7 @@ export function useActiveGarden(): Garden | undefined {
 
 export function useGardenPlants(gardenId?: string): Plant[] {
   const plants = useStore((s) => s.plants)
-  return gardenId ? plants.filter((p) => p.gardenId === gardenId) : []
+  return useMemo(() => (gardenId ? plants.filter((p) => p.gardenId === gardenId) : []), [plants, gardenId])
 }
 
 export function addGarden(g: Garden) {

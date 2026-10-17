@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { SPECIES_BY_ID } from '../../data/species'
 import { TASK_ICON, TASK_LABEL } from '../../data/labels'
 import { markTaskDone, unmarkTask, useGardenPlants, useStore } from '../../lib/store'
@@ -111,7 +111,8 @@ function YearPlan({ garden }: { garden: Garden }) {
 export function TasksPage({ garden }: { garden: Garden }) {
   const { tasks, weather, weatherError } = useTasks(garden)
   const plants = useGardenPlants(garden.id)
-  const done = useStore((s) => s.tasksDone.filter((t) => t.gardenId === garden.id))
+  const allDone = useStore((s) => s.tasksDone)
+  const done = useMemo(() => allDone.filter((t) => t.gardenId === garden.id), [allDone, garden.id])
   const [view, setView] = useState<'semaine' | 'annee'>('semaine')
   const [notif, setNotif] = useState(notificationsSupported() ? Notification.permission : 'denied')
   const open = tasks.filter((t) => !t.blockedBy)

@@ -14,10 +14,12 @@ const CONDITION_LABEL: Record<TaskCondition, string> = {
   'apres-recolte': 'après la récolte',
 }
 
+const MONTH_SHORT = ['janv.', 'févr.', 'mars', 'avr.', 'mai', 'juin', 'juil.', 'août', 'sept.', 'oct.', 'nov.', 'déc.']
+
 function monthsLabel(ms: number[]): string {
   if (ms.length === 12) return "toute l'année"
   if (ms.length === 1) return MONTH_NAMES[ms[0] - 1]
-  return ms.map((m) => MONTH_NAMES[m - 1].slice(0, 4).replace(/\.$/, '')).join(', ')
+  return ms.map((m) => MONTH_SHORT[m - 1]).join(', ')
 }
 
 function SpeciesLinks({ ids }: { ids: string[] }) {
