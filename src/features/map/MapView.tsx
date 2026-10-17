@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import maplibregl, { type GeoJSONSource, type Map as MLMap } from 'maplibre-gl'
 import { SPECIES_BY_ID } from '../../data/species'
+import { Icon } from '../../components/Icon'
 import { CADASTRE_TILES, IGN_ATTRIBUTION, ORTHO_TILES, PLAN_TILES } from '../../lib/ign'
 import { toLocal, toLonLat } from '../../lib/geo'
 import { updatePlant, useGardenPlants } from '../../lib/store'
@@ -41,6 +42,20 @@ function canopyFeatures(garden: Garden, plants: Plant[], adult: boolean): Featur
   })
 }
 
+/** Emprise (lon/lat) de la parcelle, à défaut des plantes, à défaut ±15 m autour du centre. */
+function gardenBounds(garden: Garden, plants: Plant[]): maplibregl.LngLatBoundsLike {
+  const pts: XY[] = garden.parcel?.length ? garden.parcel : plants.map((p) => p.position)
+  const local = pts.length ? pts : [{ x: -15, y: -15 }, { x: 15, y: 15 }]
+  const xs = local.map((p) => p.x)
+  const ys = local.map((p) => p.y)
+  const sw = toLonLat(garden.center, { x: Math.min(...xs), y: Math.min(...ys) })
+  const ne = toLonLat(garden.center, { x: Math.max(...xs), y: Math.max(...ys) })
+  return [[sw.lon, sw.lat], [ne.lon, ne.lat]]
+}
+
+/** Marges de cadrage : la barre d'outils flottante passe sur deux lignes sur mobile. */
+const fitPadding = () => ({ top: window.innerWidth <= 760 ? 116 : 64, left: 24, right: 24, bottom: 24 })
+
 export function MapView({ garden }: { garden: Garden }) {
   const el = useRef<HTMLDivElement>(null)
   const map = useRef<MLMap>()
@@ -53,6 +68,15 @@ export function MapView({ garden }: { garden: Garden }) {
   const [ready, setReady] = useState(false)
   const placingRef = useRef(placingSpeciesId)
   placingRef.current = placingSpeciesId
+  const plantsRef = useRef(plants)
+  plantsRef.current = plants
+
+  const fit = (animate = true) =>
+    map.current?.fitBounds(gardenBounds(garden, plantsRef.current), {
+      padding: fitPadding(),
+      maxZoom: 21,
+      duration: animate ? 600 : 0,
+    })
 
   // Création de la carte
   useEffect(() => {
@@ -81,6 +105,7 @@ export function MapView({ garden }: { garden: Garden }) {
     m.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), 'top-right')
     m.addControl(new maplibregl.ScaleControl({ unit: 'metric' }), 'bottom-left')
     m.on('load', () => {
+      m.fitBounds(gardenBounds(garden, plantsRef.current), { padding: fitPadding(), maxZoom: 21, duration: 0 })
       m.addSource('parcel', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } })
       m.addSource('buildings', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } })
       m.addSource('canopy', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } })
@@ -196,6 +221,9 @@ export function MapView({ garden }: { garden: Garden }) {
           <label className="row small" style={{ gap: 4, padding: '0 6px' }}>
             <input type="checkbox" checked={cadastre} onChange={(e) => setCadastre(e.target.checked)} /> Cadastre
           </label>
+          <button className="btn small" onClick={() => fit()} title="Recentrer sur la parcelle">
+            <Icon name="pin" size={16} /> Recentrer
+          </button>
           <label className="row small" style={{ gap: 4, padding: '0 6px' }}>
             <input type="checkbox" checked={adult} onChange={(e) => setAdult(e.target.checked)} /> Taille adulte
           </label>

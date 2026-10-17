@@ -517,7 +517,7 @@ label.field > span {
     width: 100%;
     border-left: 0;
     border-top: 1px solid var(--border);
-    max-height: 48%;
+    max-height: 38%;
   }
 }
 .floating {
