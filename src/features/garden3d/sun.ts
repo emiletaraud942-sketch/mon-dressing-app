@@ -70,15 +70,84 @@ export function sunState(date: Date, center: LonLat): SunState {
   }
 }
 
-/** Jour de l'année (1–366) d'une date locale. */
-export function dayOfYear(d: Date): number {
-  const start = new Date(d.getFullYear(), 0, 1)
-  return Math.round((new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime() - start.getTime()) / 86400000) + 1
+// ---------- Date et heure dans le fuseau du jardin ----------
+// L'heure simulée est l'heure légale du jardin (Europe/Paris par défaut, heure d'été comprise),
+// jamais celle du navigateur : un téléphone réglé sur un autre fuseau voit le même soleil.
+
+export const GARDEN_TIME_ZONE = 'Europe/Paris'
+
+export interface ZonedParts {
+  year: number
+  /** 1–12 */
+  month: number
+  day: number
+  hour: number
+  minute: number
+  second: number
 }
 
-/** Date locale pour un jour de l'année et une heure décimale. */
-export function dateFromDoy(year: number, doy: number, hour: number): Date {
+const formatters = new Map<string, Intl.DateTimeFormat>()
+function partsFormatter(tz: string): Intl.DateTimeFormat {
+  let f = formatters.get(tz)
+  if (!f) {
+    f = new Intl.DateTimeFormat('en-GB', {
+      timeZone: tz,
+      hourCycle: 'h23',
+      year: 'numeric',
+      month: 'numeric',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: 'numeric',
+      second: 'numeric',
+    })
+    formatters.set(tz, f)
+  }
+  return f
+}
+
+/** Composantes (année, mois, jour, heure…) d'un instant, lues dans le fuseau `tz`. */
+export function zonedParts(date: Date, tz = GARDEN_TIME_ZONE): ZonedParts {
+  const out: Record<string, number> = {}
+  for (const p of partsFormatter(tz).formatToParts(date)) if (p.type !== 'literal') out[p.type] = Number(p.value)
+  return { year: out.year, month: out.month, day: out.day, hour: out.hour % 24, minute: out.minute, second: out.second }
+}
+
+/** Décalage (ms) du fuseau `tz` par rapport à UTC à l'instant `ms` : heure murale − instant. */
+function offsetAt(ms: number, tz: string): number {
+  const p = zonedParts(new Date(ms), tz)
+  return Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second) - Math.floor(ms / 1000) * 1000
+}
+
+/** Jour de l'année (1–366) pour une date du calendrier (mois de 1 à 12), sans fuseau. */
+export function doyOf(year: number, month: number, day: number): number {
+  return Math.round((Date.UTC(year, month - 1, day) - Date.UTC(year, 0, 1)) / 86400000) + 1
+}
+
+export function daysInYearOf(year: number): number {
+  return doyOf(year, 12, 31)
+}
+
+/** Jour de l'année (1–366) d'un instant, lu dans le fuseau du jardin. */
+export function dayOfYear(d: Date, tz = GARDEN_TIME_ZONE): number {
+  const p = zonedParts(d, tz)
+  return doyOf(p.year, p.month, p.day)
+}
+
+/**
+ * Instant correspondant à l'heure légale « année, jour de l'année, heure décimale » dans le fuseau `tz`.
+ * Un jour de l'année hors de 1–365/366 déborde sur l'année suivante ou précédente, comme `Date`.
+ * Heure inexistante (saut de printemps) : on prend l'instant juste après le saut.
+ */
+export function dateFromDoy(year: number, doy: number, hour: number, tz = GARDEN_TIME_ZONE): Date {
   const h = Math.floor(hour)
   const m = Math.round((hour - h) * 60)
-  return new Date(year, 0, doy, h, m)
+  const wall = Date.UTC(year, 0, doy, h, m)
+  let t = wall - offsetAt(wall, tz)
+  t = wall - offsetAt(t, tz)
+  return new Date(t)
+}
+
+/** Mise en forme d'un instant dans le fuseau du jardin (français). */
+export function formatInGarden(d: Date, opts: Intl.DateTimeFormatOptions, tz = GARDEN_TIME_ZONE): string {
+  return d.toLocaleDateString('fr-FR', { ...opts, timeZone: tz })
 }

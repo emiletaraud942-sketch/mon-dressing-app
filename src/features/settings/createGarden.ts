@@ -26,13 +26,12 @@ export const FAIL_HELP: Record<Step['id'], string> = {
   climat: 'Climat non récupéré : le calendrier suivra les dates nationales, sans adaptation aux gelées locales.',
 }
 
-/** Sources manquantes d'un jardin existant (pour le bandeau « Réessayer »). */
+/** Sources manquantes d'un jardin existant (bandeau « Réessayer »). Le climat n'en fait pas partie : « aucune gelée » est une réponse valide. */
 export function missingSources(g: Garden): Step['id'][] {
   const out: Step['id'][] = []
   if (!g.parcel?.length) out.push('parcelle')
   if (g.buildings === undefined) out.push('batiments')
   if (!g.terrain) out.push('relief')
-  if (g.lastFrostDoy == null && g.firstFrostDoy == null && !g.climateChecked) out.push('climat')
   return out
 }
 

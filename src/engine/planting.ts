@@ -87,7 +87,8 @@ export function legalDistance(
   const rule = tall
     ? `Art. 671 du Code civil : une plantation de plus de 2 m de haut doit être à au moins 2 m de la limite séparative`
     : `Art. 671 du Code civil : une plantation de moins de 2 m doit être à au moins 0,5 m de la limite séparative`
-  const local = 'Des usages locaux, le PLU ou un règlement de lotissement peuvent imposer d’autres distances.'
+  const local =
+    'Des usages locaux, le PLU ou un règlement de lotissement peuvent imposer d’autres distances. Une limite en bordure de voirie n’est pas une limite séparative : l’art. 671 ne s’y applique pas.'
   if (!parcel || parcel.length < 3) {
     return { requiredM, ok: true, message: `${rule} (limite de parcelle inconnue). ${local}` }
   }
@@ -131,7 +132,7 @@ export function scoreSpecies(
 ): { score: number; factors: ScoreFactor[]; warnings: string[]; blocking: boolean } {
   const factors: ScoreFactor[] = []
   const warnings: string[] = []
-  let blocking = false
+  const blocking = false // conservé pour compatibilité : plus aucun critère bloquant
   const { garden, spot } = ctx
 
   // 1. Soleil (fort poids)
@@ -183,12 +184,12 @@ export function scoreSpecies(
     factors.push({ label: `Fixateur d'azote à proximité : ${names(fixers)}`, points: 6 })
   }
 
-  // 3. Distance légale (art. 671 du Code civil) — bloquant
+  // 3. Distance légale (art. 671 du Code civil) : avertissement et malus, jamais bloquant.
+  // Le contour de parcelle inclut parfois la voirie, qui n'est pas une limite séparative.
   if (garden.parcel && garden.parcel.length >= 3) {
     const legal = legalDistance(species, spot, garden.parcel)
     if (!legal.ok) {
-      blocking = true
-      factors.push({ label: 'Distance à la limite séparative non respectée (art. 671)', points: -40 })
+      factors.push({ label: 'Proche de la limite de parcelle (art. 671 si c’est un voisin)', points: -25 })
       warnings.push(legal.message)
     }
   }
@@ -235,7 +236,7 @@ export function scoreSpecies(
 
 /**
  * Espèces les mieux adaptées à l'emplacement, de la meilleure à la moins bonne.
- * Les espèces bloquées (distance légale) sont exclues.
+ * Les espèces marquées `blocking` (aucune aujourd'hui) seraient exclues.
  */
 export function recommendSpecies(
   all: Species[],

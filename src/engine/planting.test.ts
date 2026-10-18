@@ -123,6 +123,12 @@ describe('legalDistance (art. 671)', () => {
     expect(r.ok).toBe(true)
   })
 
+  it('le message rappelle que la voirie n’est pas une limite séparative', () => {
+    const r = legalDistance(pommier, { x: 9, y: 0 }, parcel)
+    expect(r.ok).toBe(false)
+    expect(r.message).toMatch(/voirie/i)
+  })
+
   it('hors parcelle ou parcelle inconnue', () => {
     expect(legalDistance(tomate, { x: 20, y: 0 }, parcel).ok).toBe(false)
     const r = legalDistance(pommier, { x: 0, y: 0 })
@@ -163,11 +169,17 @@ describe('scoreSpecies', () => {
     expect(pointsOf(arbres.factors, /Espacement/)).toBeLessThan(0)
   })
 
-  it('distance légale bloquante pour un arbre près de la limite', () => {
-    const r = scoreSpecies(pommier, ctx({ spot: { x: 9, y: 0 } }))
-    expect(r.blocking).toBe(true)
-    expect(r.warnings.join(' ')).toContain('671')
+  it('distance légale : avertissement et malus, jamais bloquant (la limite peut être la voirie)', () => {
+    const pres = scoreSpecies(pommier, ctx({ spot: { x: 9, y: 0 } }))
+    const centre = scoreSpecies(pommier, ctx({ spot: { x: 0, y: 0 } }))
+    expect(pres.blocking).toBe(false)
+    expect(pres.warnings.join(' ')).toContain('671')
+    expect(pointsOf(pres.factors, /limite/)).toBeLessThan(0)
+    expect(pres.score).toBeLessThan(centre.score)
+    expect(centre.warnings.join(' ')).not.toContain('671')
     expect(scoreSpecies(tomate, ctx({ spot: { x: 9, y: 0 } })).blocking).toBe(false)
+    // Emplacement hors parcelle : même traitement.
+    expect(scoreSpecies(tomate, ctx({ spot: { x: 20, y: 0 } })).blocking).toBe(false)
   })
 
   it('fixateur d’azote à proximité : bonus pour une gourmande', () => {
@@ -198,10 +210,12 @@ describe('scoreSpecies', () => {
 })
 
 describe('recommendSpecies', () => {
-  it('trie par score, filtre les catégories, exclut les bloquées', () => {
+  it('trie par score, filtre les catégories, garde les espèces près de la limite (avec avertissement)', () => {
     const all = [tomate, basilic, fenouil, pommier, hosta]
     const r = recommendSpecies(all, ctx({ spot: { x: 9, y: 0 }, sunHours: 8 }))
-    expect(r.map((x) => x.species.id)).not.toContain('pommier')
+    const pom = r.find((x) => x.species.id === 'pommier')!
+    expect(pom).toBeDefined()
+    expect(pom.warnings.join(' ')).toContain('671')
     expect(r[r.length - 1].species.id).toBe('hosta') // demande de l'ombre
     for (let i = 1; i < r.length; i++) expect(r[i - 1].score).toBeGreaterThanOrEqual(r[i].score)
     const fleurs = recommendSpecies(all, ctx(), { categories: ['fleur'] })
