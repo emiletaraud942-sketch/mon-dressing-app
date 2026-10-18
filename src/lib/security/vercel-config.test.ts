@@ -109,7 +109,7 @@ describe('en-têtes de sécurité', () => {
     const pp = Object.fromEntries(globalHeaders['Permissions-Policy'].split(',').map((x) => x.trim().split('=')))
     expect(pp.camera).toBe('(self)')
     expect(pp.geolocation).toBe('(self)')
-    for (const f of ['microphone', 'payment', 'usb', 'serial', 'bluetooth', 'hid', 'midi', 'display-capture', 'screen-wake-lock', 'gyroscope', 'accelerometer', 'magnetometer']) expect(pp[f], f).toBe('()')
+    for (const f of ['microphone', 'payment', 'usb', 'serial', 'hid', 'midi', 'display-capture', 'screen-wake-lock', 'gyroscope', 'accelerometer', 'magnetometer']) expect(pp[f], f).toBe('()')
     for (const [k, v] of Object.entries(pp)) if (v !== '()') expect(['camera', 'geolocation'], k).toContain(k)
   })
 })

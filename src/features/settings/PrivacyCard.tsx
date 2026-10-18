@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Icon } from '../../components/Icon'
 import { Modal } from '../../components/Modal'
 import { exportCurrentState } from '../../lib/backup'
+import { showToast } from '../../lib/toast'
 import { eraseAllData, type EraseReport } from '../../lib/security/erase'
 import { DATA_INVENTORY, PERMISSIONS } from '../../lib/security/inventory'
 
@@ -24,7 +25,15 @@ function EraseDialog({ onClose }: { onClose: () => void }) {
   async function run() {
     setBusy(true)
     try {
-      setReport(await eraseAllData({ remote: remote ? 'snapshot' : 'none' }))
+      const r = await eraseAllData({ remote: remote ? 'snapshot' : 'none' })
+      // L'écran Réglages disparaît dès que le dernier jardin est effacé : le résultat passe par un message qui survit.
+      const failed = r.steps.filter((s) => !s.ok).map((s) => STEP_LABEL[s.id] ?? s.id)
+      showToast({
+        message: r.ok ? 'Toutes vos données ont été effacées de cet appareil.' : `Effacement incomplet : ${failed.join(', ')}. Réessayez ou videz les données du site dans votre navigateur.`,
+        durationMs: r.ok ? 8000 : 20000,
+        tone: r.ok ? 'info' : 'error',
+      })
+      setReport(r)
     } finally {
       setBusy(false)
     }

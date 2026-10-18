@@ -7,3 +7,20 @@ dev-dist
 # Secrets locaux : tout fichier .env* sauf le modèle
 .env*
 !.env.example
+
+# Secrets et clés : jamais versionnés
+*.pem
+*.key
+*.p12
+.env
+.env.*
+!.env.example
+# CLI Supabase / Vercel : état local
+supabase/.temp
+supabase/.branches
+.vercel
+# Divers
+.DS_Store
+coverage
+playwright-report
+test-results

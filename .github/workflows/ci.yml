@@ -1,0 +1,53 @@
+# Intégration continue minimale et sûre : aucun secret, lecture seule, pas de pull_request_target.
+# Les actions sont épinglées par version majeure (Dependabot propose les mises à jour : voir dependabot.yml).
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verifier:
+    name: Typecheck, tests, build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      # --ignore-scripts : aucun script d'installation de dépendance n'est exécuté (esbuild fonctionne sans, via ses binaires par plateforme).
+      - run: npm ci --ignore-scripts
+      - run: npm run typecheck
+      - run: npm test
+      - run: npx vite build
+
+  audit:
+    name: Audit des dépendances de production
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # Non bloquant pour l'instant : maplibre-gl 4.x est signalé (GHSA-jrc7-96c5-q579, XSS dans l'attribution de carte).
+    # L'appli désactive le contrôle d'attribution et n'injecte que des textes fixes : non exploitable ici, mais la mise à jour
+    # vers maplibre-gl >= 6.4.1 est à planifier. Retirer `continue-on-error` une fois la mise à jour faite.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: npm audit --omit=dev --audit-level=high

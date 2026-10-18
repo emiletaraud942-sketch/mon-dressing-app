@@ -1,0 +1,19 @@
+# Mises à jour automatiques : une fois par semaine, regroupées pour limiter le bruit.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    groups:
+      minor-et-correctifs:
+        update-types: [minor, patch]
+    # Les mises à jour de sécurité ne sont pas limitées par ce plafond.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 3

@@ -5,7 +5,8 @@ import { Icon } from '../../components/Icon'
 import { Modal } from '../../components/Modal'
 import { exportCurrentState, lastExportAt, REMIND_EVERY_DAYS } from '../../lib/backup'
 import { getLoadWarnings, getState, removeGarden, replaceData, updateGarden, useGardenPlants, useStorageStatus, useStore } from '../../lib/store'
-import { migrateState, type StateData } from '../../lib/migrate'
+import { type StateData } from '../../lib/migrate'
+import { readBackupFile } from '../../lib/security/import'
 import { getTheme, setTheme, THEME_LABEL, type Theme } from '../../lib/theme'
 import { showToast } from '../../lib/toast'
 import { setUi, useUi } from '../../lib/ui'
@@ -183,14 +184,8 @@ function Backup() {
     input.value = '' // permet de réimporter le même fichier
     if (!file) return
     setMsg(undefined)
-    let raw: unknown
-    try {
-      raw = JSON.parse(await file.text())
-    } catch {
-      setMsg({ text: "Import impossible : ce fichier n'est pas une sauvegarde PermaJardin (JSON illisible).", error: true })
-      return
-    }
-    const r = migrateState(raw)
+    // Limite de taille, clés dangereuses retirées, plafonds et validation : tout est dans readBackupFile.
+    const r = await readBackupFile(file)
     if (!r.ok) {
       setMsg({ text: 'Import impossible : ' + r.error, error: true })
       return
