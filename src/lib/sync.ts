@@ -143,7 +143,9 @@ export async function signOutLocal() {
     }
   }
   try {
-    for (const k of Object.keys(localStorage)) if (/^sb-.*-auth-token/.test(k) || k.startsWith('permajardin:last-synced:')) localStorage.removeItem(k)
+    const keys: string[] = []
+    for (let i = 0; i < localStorage.length; i++) keys.push(localStorage.key(i) ?? '')
+    for (const k of keys) if (/^sb-.*-auth-token/.test(k) || k.startsWith('permajardin:last-synced:')) localStorage.removeItem(k)
   } catch {
     /* stockage indisponible */
   }

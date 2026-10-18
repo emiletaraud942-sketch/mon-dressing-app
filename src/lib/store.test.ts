@@ -287,6 +287,56 @@ describe('plusieurs onglets', () => {
   })
 })
 
+describe('effacement complet (wipeLocalData)', () => {
+  it('vide IndexedDB (état, copie avant migration, photos), la mémoire, et ne réécrit rien', async () => {
+    db.set(KEY, { gardens: [garden], plants: [plant], tasksDone: [] })
+    db.set(KEY + ':avant-migration', { gardens: [garden] })
+    db.set('photo:a', new Blob(['x']))
+    const s = await freshStore()
+    await s.loadState()
+    s.updateGarden('g1', { name: 'Modifié' }) // écriture en attente
+    await s.wipeLocalData()
+    await vi.advanceTimersByTimeAsync(500)
+    expect([...db.keys()]).toEqual([])
+    expect(s.getState().gardens).toEqual([])
+    expect(s.getState().plants).toEqual([])
+    expect(s.getState().loaded).toBe(true)
+    expect(s.getLoadWarnings()).toEqual([])
+  })
+
+  it('un autre onglet vide aussi sa mémoire et ne ressuscite pas les données', async () => {
+    db.set(KEY, { gardens: [garden], plants: [plant], tasksDone: [] })
+    const a = await freshStore()
+    await a.loadState()
+    const b = await freshStore()
+    await b.loadState()
+    expect(b.getState().gardens).toHaveLength(1)
+    await a.wipeLocalData()
+    await vi.advanceTimersByTimeAsync(10)
+    expect(b.getState().gardens).toEqual([])
+    b.flush()
+    await vi.advanceTimersByTimeAsync(500)
+    expect(db.has(KEY)).toBe(false)
+  })
+
+  it('l’appli reste utilisable après l’effacement', async () => {
+    const s = await freshStore()
+    await s.loadState()
+    await s.wipeLocalData()
+    s.addGarden(garden)
+    await vi.advanceTimersByTimeAsync(300)
+    expect((db.get(KEY) as { gardens: unknown[] }).gardens).toHaveLength(1)
+  })
+
+  it('propage une erreur de suppression IndexedDB', async () => {
+    const s = await freshStore()
+    await s.loadState()
+    const idbMod = await import('idb-keyval')
+    vi.mocked(idbMod.keys).mockRejectedValueOnce(new Error('IDB KO'))
+    await expect(s.wipeLocalData()).rejects.toThrow('IDB KO')
+  })
+})
+
 describe('photos orphelines', () => {
   it('removePlant supprime les photos de la plante', async () => {
     db.set(KEY, { gardens: [garden], plants: [plant], tasksDone: [] })

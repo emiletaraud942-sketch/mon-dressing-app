@@ -11,6 +11,7 @@ interface Fake {
   getUser: ReturnType<typeof vi.fn>
   signInWithOtp: ReturnType<typeof vi.fn>
   signOut: ReturnType<typeof vi.fn>
+  rpc: ReturnType<typeof vi.fn>
   options?: { auth?: Record<string, unknown> }
   afterRead?: () => void
   payloads: Record<string, unknown>[]
@@ -34,9 +35,10 @@ function makeFake(): Fake {
     getUser: vi.fn(async () => ({ data: { user: f.session?.user ?? null }, error: null })),
     signInWithOtp: vi.fn(async () => ({ error: null })),
     signOut: vi.fn(async () => ({ error: null })),
+    rpc: vi.fn(async () => ({ data: null, error: null })),
     tick,
     from: (table: string) => {
-      const q = (op: 'select' | 'insert' | 'update' | 'upsert', payload?: Record<string, unknown>) => {
+      const q = (op: 'select' | 'insert' | 'update' | 'upsert' | 'delete', payload?: Record<string, unknown>) => {
         if (payload) f.payloads.push(payload)
         const filters: [string, unknown][] = []
         let returning = op === 'select'
@@ -64,6 +66,10 @@ function makeFake(): Fake {
               r.updated_at = tick()
             }
             return { data: returning ? hit.map((r) => ({ updated_at: r.updated_at })) : null, error: null }
+          }
+          if (op === 'delete') {
+            for (const r of [...rows.values()].filter(match)) rows.delete(r.user_id)
+            return { data: null, error: null }
           }
           const id = payload!.user_id as string
           const row = { user_id: id, data: payload!.data, updated_at: tick() }
@@ -94,6 +100,7 @@ function makeFake(): Fake {
         insert: (p: Record<string, unknown>) => q('insert', p),
         update: (p: Record<string, unknown>) => q('update', p),
         upsert: (p: Record<string, unknown>) => q('upsert', p),
+        delete: () => q('delete'),
       }
     },
   }
@@ -111,7 +118,7 @@ vi.mock('./store', () => ({
 vi.mock('@supabase/supabase-js', () => ({
   createClient: (_u: string, _k: string, options: Fake['options']) => {
     fake.options = options
-    return { auth: fake, from: fake.from }
+    return { auth: fake, from: fake.from, rpc: fake.rpc }
   },
 }))
 
@@ -128,6 +135,10 @@ function stubBrowser(loc: { search?: string; hash?: string } = {}) {
     getItem: (k: string) => local.get(k) ?? null,
     setItem: (k: string, v: string) => void local.set(k, v),
     removeItem: (k: string) => void local.delete(k),
+    get length() {
+      return local.size
+    },
+    key: (i: number) => [...local.keys()][i] ?? null,
   })
   vi.stubGlobal('location', { origin: 'https://app.test', pathname: '/', search: loc.search ?? '', hash: loc.hash ?? '' })
   vi.stubGlobal('history', { replaceState })
@@ -404,5 +415,61 @@ describe('pullSnapshot', () => {
     const s = await load()
     fake.rows.set('u1', { user_id: 'u1', data: validData, updated_at: fake.tick() })
     expect(await s.pullSnapshot()).toBe(true)
+  })
+})
+
+describe('effacement en ligne et déconnexion', () => {
+  it('deleteRemoteSnapshot supprime seulement la ligne de l’utilisateur connecté', async () => {
+    const s = await load()
+    fake.rows.set('u1', { user_id: 'u1', data: validData, updated_at: fake.tick() })
+    fake.rows.set('u2', { user_id: 'u2', data: validData, updated_at: fake.tick() })
+    local.set('permajardin:last-synced:u1', 'x')
+    await s.deleteRemoteSnapshot()
+    expect([...fake.rows.keys()]).toEqual(['u2'])
+    expect(fake.calls.at(-1)).toBe('delete:garden_snapshots:user_id=u1')
+    expect(local.has('permajardin:last-synced:u1')).toBe(false)
+  })
+
+  it('deleteRemoteSnapshot exige une session et signale un refus serveur', async () => {
+    const s = await load()
+    fake.session = null
+    await expect(s.deleteRemoteSnapshot()).rejects.toThrow(/Connectez-vous/)
+  })
+
+  it('deleteMyAccount appelle delete_my_account puis déconnecte localement', async () => {
+    const s = await load()
+    local.set('sb-x-auth-token', 'jwt')
+    await s.deleteMyAccount()
+    expect(fake.rpc).toHaveBeenCalledWith('delete_my_account')
+    expect(fake.signOut).toHaveBeenCalledWith({ scope: 'local' })
+    expect(local.has('sb-x-auth-token')).toBe(false)
+  })
+
+  it('deleteMyAccount : si le serveur refuse, on ne déconnecte pas', async () => {
+    const s = await load()
+    fake.rpc.mockResolvedValueOnce({ data: null, error: { code: '42501', message: 'x' } })
+    await expect(s.deleteMyAccount()).rejects.toThrow(/Accès refusé/)
+    expect(fake.signOut).not.toHaveBeenCalled()
+  })
+
+  it('signOutLocal retire jetons et repères même hors ligne, sans réseau obligatoire', async () => {
+    const s = await load()
+    fake.signOut.mockRejectedValueOnce(new Error('réseau'))
+    local.set('sb-x-auth-token', 'jwt')
+    local.set('sb-x-auth-token-code-verifier', 'v')
+    local.set('permajardin:last-synced:u1', 'x')
+    local.set('permajardin:theme', 'dark')
+    await s.signOutLocal()
+    expect([...local.keys()]).toEqual(['permajardin:theme'])
+  })
+
+  it('sendMagicLink refuse une adresse invalide avant tout appel réseau', async () => {
+    const s = await load()
+    for (const bad of ['', 'abc', 'a@b', 'a b@c.fr', 'a@b.fr,c@d.fr', 'x'.repeat(260) + '@b.fr', '<x>@b.fr']) {
+      await expect(s.sendMagicLink(bad)).rejects.toThrow(/invalide/)
+    }
+    expect(fake.signInWithOtp).not.toHaveBeenCalled()
+    await s.sendMagicLink('  a@b.fr ')
+    expect(fake.signInWithOtp).toHaveBeenCalledWith({ email: 'a@b.fr', options: { emailRedirectTo: 'https://app.test/' } })
   })
 })

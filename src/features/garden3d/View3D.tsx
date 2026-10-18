@@ -1,11 +1,13 @@
 import { useEffect, useMemo, useState } from 'react'
 import { SPECIES_BY_ID } from '../../data/species'
 import { updatePlant, useGardenPlants } from '../../lib/store'
+import { showToast } from '../../lib/toast'
 import { setUi, useUi } from '../../lib/ui'
 import { obstaclesFor, sunHoursGrid } from '../../engine/sun'
-import type { Garden } from '../../types'
+import type { Garden, XY } from '../../types'
 import { GardenSide, PlacingBanner } from '../map/GardenSide'
 import { placePlant } from '../map/placing'
+import { SidePanel } from '../map/SidePanel'
 import { Garden3D } from './Garden3D'
 import { gardenFrame } from './framing'
 
@@ -29,6 +31,13 @@ export default function View3D({ garden }: { garden: Garden }) {
   const frame = useMemo(() => gardenFrame(garden.parcel, plants), [garden.parcel, hasParcel ? null : plants])
   const halfSizeM = frame.halfSizeM
   const plantsKey = useMemo(() => plants.map((p) => `${p.id}:${p.position.x.toFixed(1)}:${p.position.y.toFixed(1)}`).join('|'), [plants])
+
+  /** Déplacement par glisser-déposer, annulable pendant quelques secondes. */
+  const movePlant = (id: string, position: XY) => {
+    const before = plants.find((p) => p.id === id)?.position
+    updatePlant(id, { position })
+    if (before) showToast({ message: 'Plante déplacée', actionLabel: 'Annuler', onAction: () => updatePlant(id, { position: before }) })
+  }
 
   useEffect(() => {
     if (sunMode === 'aucune') {
@@ -56,7 +65,7 @@ export default function View3D({ garden }: { garden: Garden }) {
           speciesById={SPECIES_BY_ID}
           selectedPlantId={selectedPlantId}
           onSelectPlant={(id) => setUi({ selectedPlantId: id })}
-          onMovePlant={(id, position) => updatePlant(id, { position })}
+          onMovePlant={movePlant}
           placingSpeciesId={placingSpeciesId}
           onPlace={(pos) => placingSpeciesId && placePlant(garden, placingSpeciesId, pos)}
           sunHeatmap={heatmap}
@@ -64,7 +73,7 @@ export default function View3D({ garden }: { garden: Garden }) {
         />
         <PlacingBanner />
       </div>
-      <aside className="sidepanel">
+      <SidePanel tall={!!selectedPlantId}>
         <div className="stack" style={{ gap: 8, marginBottom: 16 }}>
           <label className="field">
             <span>Carte d'ensoleillement (heures de soleil direct)</span>
@@ -83,7 +92,7 @@ export default function View3D({ garden }: { garden: Garden }) {
           )}
         </div>
         <GardenSide garden={garden} hint="Faites tourner la vue à deux doigts ou à la souris. Glissez une plante pour la déplacer. Le mode « Promenade » vous place à hauteur d'yeux dans le jardin. Le curseur « dans N ans » montre vos arbres adultes et leur ombre future." />
-      </aside>
+      </SidePanel>
     </div>
   )
 }
