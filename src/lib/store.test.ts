@@ -1,0 +1,347 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+
+// Faux idb-keyval partagé entre « onglets » (les modules sont ré-importés avec resetModules).
+const db = new Map<string, unknown>()
+const idb = {
+  failGet: false,
+  failSet: false as false | Error,
+  sets: [] as string[],
+}
+vi.mock('idb-keyval', () => ({
+  get: vi.fn(async (k: string) => {
+    if (idb.failGet) throw new Error('lecture KO')
+    return db.get(k)
+  }),
+  set: vi.fn(async (k: string, v: unknown) => {
+    if (idb.failSet) throw idb.failSet
+    idb.sets.push(k)
+    db.set(k, structuredClone(v))
+  }),
+  del: vi.fn(async (k: string) => {
+    db.delete(k)
+  }),
+  keys: vi.fn(async () => [...db.keys()]),
+}))
+
+// Faux BroadcastChannel : livre les messages aux autres instances du même nom.
+class FakeChannel {
+  static all: FakeChannel[] = []
+  onmessage: ((e: { data: unknown }) => void) | null = null
+  constructor(public name: string) {
+    FakeChannel.all.push(this)
+  }
+  postMessage(data: unknown) {
+    for (const c of FakeChannel.all) if (c !== this && c.name === this.name) queueMicrotask(() => c.onmessage?.({ data }))
+  }
+  close() {}
+  unref() {}
+}
+
+const KEY = 'permajardin:state:v1'
+const garden = { id: 'g1', name: 'J', address: '', center: { lon: 4, lat: 45 }, createdAt: '2025-01-01T00:00:00.000Z' }
+const plant = { id: 'p1', gardenId: 'g1', speciesId: 'pommier', position: { x: 0, y: 0 }, plantedAt: '2024-03-10', status: 'en-place' as const, photos: ['photo:a'] }
+
+let win: EventTarget
+let doc: EventTarget & { visibilityState: string }
+
+async function freshStore() {
+  vi.resetModules()
+  return import('./store')
+}
+
+beforeEach(() => {
+  db.clear()
+  idb.failGet = false
+  idb.failSet = false
+  idb.sets = []
+  FakeChannel.all = []
+  win = new EventTarget()
+  doc = Object.assign(new EventTarget(), { visibilityState: 'visible' })
+  vi.stubGlobal('window', win)
+  vi.stubGlobal('document', doc)
+  vi.stubGlobal('BroadcastChannel', FakeChannel)
+  vi.stubGlobal('navigator', {})
+  vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+  vi.useFakeTimers()
+})
+afterEach(() => {
+  vi.useRealTimers()
+  vi.unstubAllGlobals()
+  vi.restoreAllMocks()
+})
+
+describe('loadState', () => {
+  it('charge un ancien format v1 et choisit un jardin actif valide', async () => {
+    db.set(KEY, { gardens: [garden], plants: [plant], tasksDone: [], activeGardenId: 'inexistant' })
+    const s = await freshStore()
+    await s.loadState()
+    expect(s.getState().loaded).toBe(true)
+    expect(s.getState().activeGardenId).toBe('g1')
+    expect(s.getState().plants).toHaveLength(1)
+    expect(s.getStorageStatus().readFailed).toBe(false)
+  })
+
+  it('ne casse pas sur des données abîmées et sauvegarde l’original avant de réécrire', async () => {
+    db.set(KEY, { gardens: [garden, { id: 'x' }], plants: [{ ...plant, plantedAt: 'zzz' }, { id: 'q' }], tasksDone: 'oops' })
+    const s = await freshStore()
+    await s.loadState()
+    expect(s.getState().gardens).toHaveLength(1)
+    expect(s.getState().plants).toHaveLength(1)
+    expect(s.getState().tasksDone).toEqual([])
+    expect(s.getLoadWarnings().length).toBeGreaterThan(0)
+    await vi.advanceTimersByTimeAsync(300)
+    const saved = db.get(KEY) as { version: number }
+    expect(saved.version).toBe(2)
+    expect(db.get(KEY + ':avant-migration')).toBeTruthy()
+  })
+
+  it('une base vide donne un état vide chargé, sans écriture inutile', async () => {
+    const s = await freshStore()
+    await s.loadState()
+    await vi.advanceTimersByTimeAsync(500)
+    expect(s.getState().loaded).toBe(true)
+    expect(idb.sets).toEqual([])
+  })
+
+  it('stocke la version dans la donnée', async () => {
+    const s = await freshStore()
+    await s.loadState()
+    s.addGarden(garden)
+    await vi.advanceTimersByTimeAsync(300)
+    expect((db.get(KEY) as { version: number }).version).toBe(2)
+  })
+
+  it('purge les tâches faites trop anciennes au chargement', async () => {
+    const old = { id: 't1', gardenId: 'g1', taskKey: '2020-01-01:a:b', doneAt: '2020-01-01T00:00:00.000Z' }
+    const recent = { id: 't2', gardenId: 'g1', taskKey: 'x:a:b', doneAt: new Date().toISOString() }
+    db.set(KEY, { gardens: [garden], plants: [], tasksDone: [old, recent] })
+    const s = await freshStore()
+    await s.loadState()
+    expect(s.getState().tasksDone.map((t) => t.id)).toEqual(['t2'])
+  })
+})
+
+describe('sauvegarde', () => {
+  it('regroupe les écritures (200 ms) puis flush() écrit immédiatement', async () => {
+    const s = await freshStore()
+    await s.loadState()
+    s.addGarden(garden)
+    expect(idb.sets).toEqual([])
+    s.flush()
+    await vi.advanceTimersByTimeAsync(0)
+    expect(idb.sets).toEqual([KEY])
+    await vi.advanceTimersByTimeAsync(500)
+    expect(idb.sets).toEqual([KEY]) // pas de seconde écriture
+  })
+
+  it('écrit immédiatement sur pagehide', async () => {
+    const s = await freshStore()
+    await s.loadState()
+    s.addGarden(garden)
+    win.dispatchEvent(new Event('pagehide'))
+    await vi.advanceTimersByTimeAsync(0)
+    expect(db.has(KEY)).toBe(true)
+  })
+
+  it('écrit immédiatement quand la page passe en arrière-plan, pas quand elle revient', async () => {
+    const s = await freshStore()
+    await s.loadState()
+    s.addGarden(garden)
+    doc.visibilityState = 'visible'
+    doc.dispatchEvent(new Event('visibilitychange'))
+    await vi.advanceTimersByTimeAsync(0)
+    expect(db.has(KEY)).toBe(false)
+    doc.visibilityState = 'hidden'
+    doc.dispatchEvent(new Event('visibilitychange'))
+    await vi.advanceTimersByTimeAsync(0)
+    expect(db.has(KEY)).toBe(true)
+  })
+
+  it('un échec d’écriture renseigne writeError puis se corrige à la prochaine réussite', async () => {
+    const s = await freshStore()
+    await s.loadState()
+    idb.failSet = new Error('plein')
+    s.addGarden(garden)
+    await vi.advanceTimersByTimeAsync(300)
+    expect(s.getStorageStatus().writeError).toMatch(/enregistrer/i)
+    idb.failSet = false
+    s.updateGarden('g1', { name: 'Autre' })
+    await vi.advanceTimersByTimeAsync(300)
+    expect(s.getStorageStatus().writeError).toBeUndefined()
+  })
+
+  it('demande le stockage persistant au chargement', async () => {
+    const persist = vi.fn(async () => true)
+    vi.stubGlobal('navigator', { storage: { persist, persisted: async () => false } })
+    const s = await freshStore()
+    await s.loadState()
+    await vi.advanceTimersByTimeAsync(0)
+    expect(persist).toHaveBeenCalled()
+    expect(s.getStorageStatus().persistent).toBe(true)
+  })
+
+  it('persistent reste indéfini si l’API manque ou plante', async () => {
+    vi.stubGlobal('navigator', { storage: { persist: async () => { throw new Error('non') } } })
+    const s = await freshStore()
+    await s.loadState()
+    await vi.advanceTimersByTimeAsync(0)
+    expect(s.getStorageStatus().persistent).toBeUndefined()
+  })
+})
+
+describe('échec de lecture', () => {
+  it('ne persiste rien tant que l’utilisateur n’a pas confirmé', async () => {
+    db.set(KEY, { gardens: [garden], plants: [plant], tasksDone: [] })
+    idb.failGet = true
+    const s = await freshStore()
+    await s.loadState()
+    expect(s.getStorageStatus().readFailed).toBe(true)
+    s.addGarden({ ...garden, id: 'g2' })
+    s.flush()
+    win.dispatchEvent(new Event('pagehide'))
+    await vi.advanceTimersByTimeAsync(500)
+    expect(idb.sets).toEqual([])
+    expect((db.get(KEY) as { gardens: unknown[] }).gardens).toHaveLength(1)
+  })
+
+  it('reprend les écritures après resumeSaving()', async () => {
+    idb.failGet = true
+    const s = await freshStore()
+    await s.loadState()
+    s.addGarden(garden)
+    s.resumeSaving()
+    await vi.advanceTimersByTimeAsync(300)
+    expect(s.getStorageStatus().readFailed).toBe(false)
+    expect(db.has(KEY)).toBe(true)
+  })
+
+  it('retryLoadState() relit et lève le blocage si la lecture réussit', async () => {
+    db.set(KEY, { gardens: [garden], plants: [], tasksDone: [] })
+    idb.failGet = true
+    const s = await freshStore()
+    await s.loadState()
+    idb.failGet = false
+    await s.retryLoadState()
+    expect(s.getStorageStatus().readFailed).toBe(false)
+    expect(s.getState().gardens).toHaveLength(1)
+  })
+
+  it('une donnée plus récente que l’appli est traitée comme illisible (jamais écrasée)', async () => {
+    db.set(KEY, { version: 99, gardens: [garden], plants: [] })
+    const s = await freshStore()
+    await s.loadState()
+    expect(s.getStorageStatus().readFailed).toBe(true)
+    s.addGarden({ ...garden, id: 'g2' })
+    await vi.advanceTimersByTimeAsync(500)
+    expect((db.get(KEY) as { version: number }).version).toBe(99)
+  })
+
+  it('replaceData (import) est une action explicite qui lève le blocage', async () => {
+    idb.failGet = true
+    const s = await freshStore()
+    await s.loadState()
+    s.replaceData({ gardens: [garden], plants: [], tasksDone: [] })
+    await vi.advanceTimersByTimeAsync(300)
+    expect(s.getStorageStatus().readFailed).toBe(false)
+    expect(db.has(KEY)).toBe(true)
+  })
+
+  it('ne supprime aucune photo quand la lecture a échoué', async () => {
+    db.set('photo:orpheline', new Blob(['x']))
+    idb.failGet = true
+    const s = await freshStore()
+    await s.loadState()
+    await s.purgeOrphanPhotos()
+    expect(db.has('photo:orpheline')).toBe(true)
+  })
+})
+
+describe('plusieurs onglets', () => {
+  it('l’autre onglet recharge l’état quand un onglet écrit', async () => {
+    const a = await freshStore()
+    await a.loadState()
+    const b = await freshStore()
+    await b.loadState()
+    a.addGarden(garden)
+    await vi.advanceTimersByTimeAsync(300)
+    await vi.advanceTimersByTimeAsync(10)
+    expect(b.getState().gardens.map((g) => g.id)).toEqual(['g1'])
+    // et il n’a pas réécrit en retour
+    expect(idb.sets).toEqual([KEY])
+  })
+
+  it('ne recharge pas par-dessus des modifications locales en attente', async () => {
+    const a = await freshStore()
+    await a.loadState()
+    const b = await freshStore()
+    await b.loadState()
+    b.addGarden({ ...garden, id: 'local' })
+    a.addGarden(garden)
+    a.flush()
+    await vi.advanceTimersByTimeAsync(0)
+    expect(b.getState().gardens.map((g) => g.id)).toEqual(['local'])
+    await vi.advanceTimersByTimeAsync(300) // b écrit : dernier écrivain gagne
+    await vi.advanceTimersByTimeAsync(10)
+    expect((db.get(KEY) as { gardens: { id: string }[] }).gardens.map((g) => g.id)).toEqual(['local'])
+    expect(a.getState().gardens.map((g) => g.id)).toEqual(['local'])
+  })
+})
+
+describe('photos orphelines', () => {
+  it('removePlant supprime les photos de la plante', async () => {
+    db.set(KEY, { gardens: [garden], plants: [plant], tasksDone: [] })
+    db.set('photo:a', new Blob(['x']))
+    const s = await freshStore()
+    await s.loadState()
+    s.removePlant('p1')
+    await vi.advanceTimersByTimeAsync(10)
+    expect(db.has('photo:a')).toBe(false)
+  })
+
+  it('removePlant avec keepPhotos conserve les photos (annulation possible)', async () => {
+    db.set(KEY, { gardens: [garden], plants: [plant], tasksDone: [] })
+    db.set('photo:a', new Blob(['x']))
+    const s = await freshStore()
+    await s.loadState()
+    s.removePlant('p1', { keepPhotos: true })
+    await vi.advanceTimersByTimeAsync(10)
+    expect(db.has('photo:a')).toBe(true)
+  })
+
+  it('removeGarden supprime les photos de ses plantes', async () => {
+    db.set(KEY, { gardens: [garden, { ...garden, id: 'g2' }], plants: [plant, { ...plant, id: 'p2', gardenId: 'g2', photos: ['photo:b'] }], tasksDone: [] })
+    db.set('photo:a', new Blob(['x']))
+    db.set('photo:b', new Blob(['x']))
+    const s = await freshStore()
+    await s.loadState()
+    s.removeGarden('g1')
+    await vi.advanceTimersByTimeAsync(10)
+    expect(db.has('photo:a')).toBe(false)
+    expect(db.has('photo:b')).toBe(true)
+  })
+
+  it('replaceData supprime les photos des plantes retirées, sauf celles encore référencées', async () => {
+    db.set(KEY, { gardens: [garden], plants: [plant, { ...plant, id: 'p2', photos: ['photo:b'] }], tasksDone: [] })
+    db.set('photo:a', new Blob(['x']))
+    db.set('photo:b', new Blob(['x']))
+    const s = await freshStore()
+    await s.loadState()
+    s.replaceData({ gardens: [garden], plants: [{ ...plant, id: 'p9', photos: ['photo:a'] }], tasksDone: [] })
+    await vi.advanceTimersByTimeAsync(10)
+    expect(db.has('photo:a')).toBe(true)
+    expect(db.has('photo:b')).toBe(false)
+  })
+
+  it('purgeOrphanPhotos supprime les blobs non référencés au chargement, pas les autres clés', async () => {
+    db.set(KEY, { gardens: [garden], plants: [plant], tasksDone: [] })
+    db.set('photo:a', new Blob(['x']))
+    db.set('photo:orpheline', new Blob(['x']))
+    db.set('autre', 1)
+    const s = await freshStore()
+    await s.loadState()
+    await vi.advanceTimersByTimeAsync(10)
+    expect(db.has('photo:a')).toBe(true)
+    expect(db.has('photo:orpheline')).toBe(false)
+    expect(db.has('autre')).toBe(true)
+  })
+})

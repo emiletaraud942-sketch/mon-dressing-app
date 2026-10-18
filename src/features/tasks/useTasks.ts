@@ -1,37 +1,118 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { SPECIES_BY_ID } from '../../data/species'
+import { isoDate } from '../../lib/dates'
 import { useGardenPlants, useStore } from '../../lib/store'
 import { fetchWeather } from '../../lib/weather'
 import { generateTasks } from '../../engine/tasks'
 import type { Garden, GeneratedTask, WeatherBundle } from '../../types'
 
-const weatherCache = new Map<string, Promise<WeatherBundle>>()
+/** Durée de vie du cache mémoire (alignée sur le cache localStorage de weather.ts). */
+const WEATHER_TTL_MS = 3 * 3600 * 1000
+/** Données de repli (hors ligne) : on retente après 1 min seulement. */
+const STALE_RETRY_MS = 60 * 1000
+
+interface CacheEntry {
+  p: Promise<WeatherBundle>
+  /** Instant de chargement (ms) ; décalé pour les données périmées afin qu'elles expirent vite. */
+  t: number
+}
+const weatherCache = new Map<string, CacheEntry>()
+
+function loadWeather(center: Garden['center'], force: boolean): Promise<WeatherBundle> {
+  const key = `${center.lon.toFixed(3)},${center.lat.toFixed(3)}`
+  const hit = weatherCache.get(key)
+  if (!force && hit && Date.now() - hit.t < WEATHER_TTL_MS) return hit.p
+  const entry: CacheEntry = { p: fetchWeather(center), t: Date.now() }
+  weatherCache.set(key, entry)
+  entry.p.then(
+    (w) => {
+      if (w.stale) entry.t = Date.now() - WEATHER_TTL_MS + STALE_RETRY_MS
+    },
+    () => {
+      if (weatherCache.get(key) === entry) weatherCache.delete(key) // purge sur erreur
+    },
+  )
+  return entry.p
+}
 
 export function useWeather(garden?: Garden) {
   const [weather, setWeather] = useState<WeatherBundle>()
   const [error, setError] = useState<string>()
+  const [loading, setLoading] = useState(!!garden)
+  const center = garden?.center
+  const lon = center?.lon
+  const lat = center?.lat
+  /** Dernier chargement réussi : instant et jour local. */
+  const last = useRef<{ t: number; day: string }>()
+  /** Numéro de requête : seule la plus récente met l'état à jour. */
+  const seq = useRef(0)
+  const needsRetry = useRef(false)
+
+  const load = useCallback(
+    (force: boolean) => {
+      if (lon == null || lat == null) return
+      const id = ++seq.current
+      setLoading(true)
+      loadWeather({ lon, lat }, force).then(
+        (w) => {
+          if (id !== seq.current) return
+          last.current = { t: Date.now(), day: isoDate() }
+          needsRetry.current = !!w.stale
+          setWeather(w)
+          setError(undefined)
+          setLoading(false)
+        },
+        (e) => {
+          if (id !== seq.current) return
+          needsRetry.current = true
+          setError((e as Error).message)
+          setLoading(false)
+        },
+      )
+    },
+    [lon, lat],
+  )
+
   useEffect(() => {
-    if (!garden) return
-    const key = `${garden.center.lon.toFixed(3)},${garden.center.lat.toFixed(3)}`
-    let p = weatherCache.get(key)
-    if (!p) {
-      p = fetchWeather(garden.center)
-      weatherCache.set(key, p)
-      p.catch(() => weatherCache.delete(key))
+    setWeather(undefined)
+    setError(undefined)
+    last.current = undefined
+    needsRetry.current = false
+    if (lon == null || lat == null) {
+      setLoading(false)
+      return
     }
-    let alive = true
-    p.then((w) => alive && (setWeather(w), setError(undefined))).catch((e) => alive && setError((e as Error).message))
+    load(false)
+    const onOnline = () => {
+      if (needsRetry.current || !last.current || Date.now() - last.current.t > WEATHER_TTL_MS) load(true)
+    }
+    const onVisible = () => {
+      if (document.visibilityState !== 'visible') return
+      const l = last.current
+      // Données de plus de 3 h, ou changement de jour pendant que l'appli dormait (re-découpe via le cache).
+      if (!l || Date.now() - l.t > WEATHER_TTL_MS || l.day !== isoDate()) load(true)
+    }
+    window.addEventListener('online', onOnline)
+    document.addEventListener('visibilitychange', onVisible)
     return () => {
-      alive = false
+      seq.current++ // invalide les réponses en vol
+      window.removeEventListener('online', onOnline)
+      document.removeEventListener('visibilitychange', onVisible)
     }
-  }, [garden?.center.lon, garden?.center.lat]) // eslint-disable-line react-hooks/exhaustive-deps
-  return { weather, error }
+  }, [lon, lat, load])
+
+  return { weather, error, loading }
 }
 
-export function useTasks(garden?: Garden): { tasks: (GeneratedTask & { done?: boolean })[]; weather?: WeatherBundle; weatherError?: string } {
+export function useTasks(garden?: Garden): {
+  tasks: (GeneratedTask & { done?: boolean })[]
+  weather?: WeatherBundle
+  weatherError?: string
+  weatherLoading: boolean
+} {
   const plants = useGardenPlants(garden?.id)
   const tasksDone = useStore((s) => s.tasksDone)
-  const { weather, error } = useWeather(garden)
+  const { weather, error, loading } = useWeather(garden)
   const tasks = useMemo(() => {
     if (!garden) return []
     try {
@@ -48,5 +129,5 @@ export function useTasks(garden?: Garden): { tasks: (GeneratedTask & { done?: bo
       return []
     }
   }, [garden, plants, weather, tasksDone])
-  return { tasks, weather, weatherError: error }
+  return { tasks, weather, weatherError: error, weatherLoading: loading }
 }

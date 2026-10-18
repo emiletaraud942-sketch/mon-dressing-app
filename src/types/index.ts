@@ -197,6 +197,8 @@ export interface WeatherBundle {
   fetchedAt: string
   past: DailyWeather[] // 7 derniers jours
   forecast: DailyWeather[] // 7 prochains jours
+  /** true si les données viennent du cache expiré (réseau indisponible) ; `fetchedAt` date alors les données. */
+  stale?: boolean
 }
 
 // ---------- Tâches générées ----------

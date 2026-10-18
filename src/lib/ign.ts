@@ -10,6 +10,7 @@
 // - altimétrie : {"elevations":[z…]} avec zonly=true, -99999 hors couverture, 5 000 points max, 5 req/s/IP.
 import type { LonLat, TerrainGrid, XY } from '../types'
 import { distanceToRing, pointInRing, toLocal, toLonLat } from './geo'
+import { fetchJson } from './http'
 
 export interface GeocodeResult {
   label: string
@@ -44,25 +45,53 @@ export const PLAN_TILES = `${WMTS}&LAYER=GEOGRAPHICALGRIDSYSTEMS.PLANIGNV2&STYLE
 export const CADASTRE_TILES = `${WMTS}&LAYER=CADASTRALPARCELS.PARCELLAIRE_EXPRESS&STYLE=PCI%20vecteur&FORMAT=image/png`
 export const IGN_ATTRIBUTION = '© IGN – Géoplateforme'
 
+/**
+ * Zoom maximal des tuiles à demander (au-delà MapLibre sur-échantillonne : `maxzoom` de la source).
+ * NON VÉRIFIÉS en direct (GetCapabilities inaccessible depuis le conteneur de dev) : valeurs prudentes.
+ * Seul z18 est confirmé pour les trois couches ; l'orthophoto existe aussi en z19 (usage courant du Géoportail).
+ * À relever après vérification du GetCapabilities (TileMatrixSetLimits de la couche en PM).
+ */
+export const ORTHO_MAXZOOM = 19
+export const PLAN_MAXZOOM = 18
+export const CADASTRE_MAXZOOM = 18
+
 const R = 6378137
 
 // ---------- utilitaires ----------
 
-async function getJson<T>(url: string, service: string): Promise<T> {
-  let res: Response
+const RETRY_DELAY_MS = 600
+const SERVICE = 'Géoplateforme IGN'
+
+/** Erreur réseau ou 5xx/429 (messages de `fetchJson`) : un nouvel essai a une chance de réussir. */
+function isRetryable(e: unknown): boolean {
+  if (!(e instanceof Error) || e.name === 'AbortError') return false
+  return e.message.startsWith('Connexion impossible') || /\((429|5\d\d)\)/.test(e.message)
+}
+
+function abortError(): Error {
+  const e = new Error('Requête annulée.')
+  e.name = 'AbortError'
+  return e
+}
+
+interface GetOpts {
+  service?: string
+  timeoutMs?: number
+  signal?: AbortSignal
+}
+
+/** GET JSON avec délai (15 s par défaut) et un seul réessai après 600 ms (tous nos appels sont idempotents). */
+async function getJson<T>(url: string, opts: GetOpts = {}): Promise<T> {
+  const { service = SERVICE, timeoutMs = 15000, signal } = opts
+  if (signal?.aborted) throw abortError()
+  const call = () => fetchJson<T>(url, { service, timeoutMs, signal })
   try {
-    res = await fetch(url)
-  } catch {
-    throw new Error(`Impossible de joindre le service ${service} (connexion réseau ?).`)
-  }
-  if (!res.ok) {
-    if (res.status === 429) throw new Error(`Le service ${service} est saturé, réessayez dans quelques secondes.`)
-    throw new Error(`Le service ${service} a répondu par une erreur (HTTP ${res.status}).`)
-  }
-  try {
-    return (await res.json()) as T
-  } catch {
-    throw new Error(`Réponse illisible du service ${service}.`)
+    return await call()
+  } catch (e) {
+    if (!isRetryable(e)) throw e
+    await new Promise((r) => setTimeout(r, RETRY_DELAY_MS))
+    if (signal?.aborted) throw abortError()
+    return call()
   }
 }
 
@@ -119,15 +148,18 @@ export function parseGeocode(fc: GeoJsonFC): GeocodeResult[] {
     })
 }
 
-/** Recherche d'adresses (autocomplétion). */
-export async function geocode(query: string): Promise<GeocodeResult[]> {
+/**
+ * Recherche d'adresses (autocomplétion). Avec `signal`, l'appelant peut annuler une réponse devenue
+ * périmée : la promesse est alors rejetée avec une erreur `AbortError` (à ignorer côté UI).
+ */
+export async function geocode(query: string, opts: { signal?: AbortSignal } = {}): Promise<GeocodeResult[]> {
   const q = query.trim().replace(/\s+/g, ' ')
   if (q.length < 3) return []
   const key = q.toLowerCase()
   const hit = geocodeCache.get(key)
   if (hit) return hit
   const url = `/ext/geopf/geocodage/search?q=${encodeURIComponent(q)}&limit=6&index=address`
-  const results = parseGeocode(await getJson<GeoJsonFC>(url, 'de géocodage IGN'))
+  const results = parseGeocode(await getJson<GeoJsonFC>(url, { signal: opts.signal }))
   if (geocodeCache.size > 100) geocodeCache.delete(geocodeCache.keys().next().value as string)
   geocodeCache.set(key, results)
   return results
@@ -151,6 +183,8 @@ function featureToParcel(f: GeoJsonFeature): ParcelResult | null {
 /**
  * Choisit dans une FeatureCollection de parcelles celle qui contient le point,
  * sinon la plus proche (cas fréquent : le point d'adresse est sur le trottoir).
+ * Les `rings` de la parcelle renvoyée sont TRIÉS : `rings[0]` est l'anneau qui contient le point
+ * (ou, à défaut, le plus proche), ce qui compte pour les multipolygones.
  */
 export function pickParcel(fc: GeoJsonFC, p: LonLat, maxDistM = 30): ParcelResult | null {
   let best: ParcelResult | null = null
@@ -158,13 +192,16 @@ export function pickParcel(fc: GeoJsonFC, p: LonLat, maxDistM = 30): ParcelResul
   for (const f of fc.features ?? []) {
     const parcel = featureToParcel(f)
     if (!parcel) continue
-    for (const ring of parcel.rings) {
-      const local: XY[] = ring.map((q) => toLocal(p, q))
-      const d = pointInRing({ x: 0, y: 0 }, local) ? 0 : distanceToRing({ x: 0, y: 0 }, local)
-      if (d < bestD) {
-        bestD = d
-        best = parcel
-      }
+    const ranked = parcel.rings
+      .map((ring) => {
+        const local: XY[] = ring.map((q) => toLocal(p, q))
+        const d = pointInRing({ x: 0, y: 0 }, local) ? 0 : distanceToRing({ x: 0, y: 0 }, local)
+        return { ring, d }
+      })
+      .sort((a, b) => a.d - b.d) // tri stable : l'ordre d'origine départage les égalités
+    if (ranked[0].d < bestD) {
+      bestD = ranked[0].d
+      best = { ...parcel, rings: ranked.map((r) => r.ring) }
     }
   }
   return bestD <= maxDistM ? best : null
@@ -192,7 +229,7 @@ export async function fetchParcel(p: LonLat): Promise<ParcelResult | null> {
   try {
     const fc = await getJson<GeoJsonFC>(
       `/ext/apicarto/api/cadastre/parcelle?geom=${encodeURIComponent(geom)}`,
-      'API Carto (cadastre)',
+      { service: 'API Carto (cadastre)' },
     )
     const hit = pickParcel(fc, p, 0)
     if (hit) return hit
@@ -203,7 +240,6 @@ export async function fetchParcel(p: LonLat): Promise<ParcelResult | null> {
   try {
     const fc = await getJson<GeoJsonFC>(
       wfsUrl('CADASTRALPARCELS.PARCELLAIRE_EXPRESS:parcelle', p, 20, 50),
-      'cadastre de la Géoplateforme',
     )
     return pickParcel(fc, p, 30)
   } catch (e) {
@@ -236,7 +272,7 @@ export function parseBuildings(fc: GeoJsonFC, max = 200): BuildingResult[] {
 
 /** Bâtiments BD TOPO dans un carré de demi-côté radiusM autour du centre. */
 export async function fetchBuildings(center: LonLat, radiusM: number): Promise<BuildingResult[]> {
-  const fc = await getJson<GeoJsonFC>(wfsUrl('BDTOPO_V3:batiment', center, radiusM, 200), 'BD TOPO (bâtiments)')
+  const fc = await getJson<GeoJsonFC>(wfsUrl('BDTOPO_V3:batiment', center, radiusM, 200))
   return parseBuildings(fc, 200)
 }
 
@@ -304,14 +340,8 @@ async function fetchElevations(points: LonLat[]): Promise<(number | null)[]> {
       `?lon=${batch.map((p) => f7(p.lon)).join('|')}` +
       `&lat=${batch.map((p) => f7(p.lat)).join('|')}` +
       '&resource=ign_rge_alti_wld&delimiter=|&zonly=true'
-    let json: unknown
-    try {
-      json = await getJson<unknown>(url, 'd’altimétrie IGN')
-    } catch {
-      // Limite de 5 requêtes/s : une seconde tentative après une courte pause.
-      await new Promise((r) => setTimeout(r, 600))
-      json = await getJson<unknown>(url, 'd’altimétrie IGN')
-    }
+    // 30 s par lot ; limite de 5 requêtes/s : le 429 est réessayé une fois après 600 ms.
+    const json = await getJson<unknown>(url, { timeoutMs: 30000 })
     out.push(...parseElevations(json, batch.length))
   }
   return out
@@ -362,10 +392,11 @@ export function orthoBbox(center: LonLat, halfSizeM: number): [number, number, n
 
 /** URL d'une image orthophoto (WMS) couvrant exactement le carré local [-halfSizeM, +halfSizeM]. */
 export function orthoTextureUrl(center: LonLat, halfSizeM: number, px = 1024): string {
-  const bbox = orthoBbox(center, halfSizeM)
+  // Emprise minimale 1 m (évite une BBOX dégénérée) ; les petites emprises (15–100 m) donnent des BBOX valides.
+  const bbox = orthoBbox(center, Math.max(1, halfSizeM))
     .map((v) => v.toFixed(2))
     .join(',')
-  const size = Math.max(16, Math.min(2048, Math.round(px))) // 2048 px vérifié côté serveur
+  const size = Number.isFinite(px) ? Math.max(16, Math.min(2048, Math.round(px))) : 1024 // 2048 px vérifié côté serveur
   return (
     '/ext/geopf/wms-r?SERVICE=WMS&VERSION=1.3.0&REQUEST=GetMap&LAYERS=ORTHOIMAGERY.ORTHOPHOTOS&STYLES=' +
     `&CRS=EPSG:3857&BBOX=${bbox}&WIDTH=${size}&HEIGHT=${size}&FORMAT=image/jpeg`

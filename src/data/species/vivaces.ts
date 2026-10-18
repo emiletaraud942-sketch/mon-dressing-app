@@ -349,8 +349,8 @@ export const VIVACES: Species[] = [
       },
       {
         type: 'recolte',
-        months: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
-        frequencyDays: 14,
+        months: [4, 5, 6, 7, 8, 9, 10, 11],
+        frequencyDays: 30,
         howTo: 'Cueillir les jeunes feuilles et les bourgeons terminaux en tournant autour du pied, sans jamais le dénuder.',
       },
       {
@@ -368,7 +368,7 @@ export const VIVACES: Species[] = [
       compostAutomne,
     ],
     entretien:
-      "Ce chou vivace ne fleurit presque jamais et se récolte toute l'année pendant 5 ans environ. Il apprécie un sol riche : compost à l'automne et paillage permanent. Rajeunissez la touffe par bouturage tous les 4 à 5 ans. Les aromatiques à proximité brouillent l'odeur du chou pour la piéride.",
+      "Ce chou vivace ne fleurit presque jamais et se récolte toute l'année pendant 5 ans environ. Il apprécie un sol riche : compost à l'automne et paillage permanent. Rajeunissez la touffe par bouturage tous les 4 à 5 ans. Les aromatiques à proximité brouillent l'odeur du chou pour la piéride. Les feuilles se cueillent à la demande, toute l'année, en cuisant bien (au moins 10 minutes).",
     couleur: '#5d7f6e',
     couleurAccent: '#f3e27a',
   },
@@ -485,6 +485,12 @@ export const VIVACES: Species[] = [
         months: [5, 6],
         howTo: 'Tendre un filet anti-oiseaux sur arceaux et poser des pièges à bière ou des planches contre les limaces.',
         tool: 'filet anti-oiseaux',
+      },
+      {
+        type: 'recolte',
+        months: [5, 6, 7, 8, 9, 10],
+        frequencyDays: 2,
+        howTo: 'Cueillir les fraises entièrement rouges, le matin après la rosée, en pinçant la queue (sans tirer sur le fruit) et en les posant sans les empiler. Repasser tous les 2 jours, retirer les fruits pourris pour éviter la pourriture grise et consommer dans la journée.',
       },
       {
         type: 'division',

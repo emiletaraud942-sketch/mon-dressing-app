@@ -7,9 +7,13 @@ import {
   fetchTerrain,
   fillMissing,
   geocode,
+  CADASTRE_MAXZOOM,
+  ORTHO_MAXZOOM,
+  PLAN_MAXZOOM,
   orthoBbox,
   orthoTextureUrl,
   parseElevations,
+  pickParcel,
   terrainPoints,
   toMercator,
   wfsBbox,
@@ -148,7 +152,59 @@ describe('geocode', () => {
 
   it('message en français en cas d’erreur HTTP', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response('', { status: 503 })))
-    await expect(geocode('zzz introuvable')).rejects.toThrow(/géocodage IGN.*503/)
+    await expect(geocode('zzz introuvable')).rejects.toThrow(/Géoplateforme IGN.*503/)
+  })
+
+  it('réessaie une fois après une erreur 5xx', async () => {
+    let n = 0
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => (++n === 1 ? new Response('', { status: 503 }) : new Response(JSON.stringify(GEOCODE)))),
+    )
+    const r = await geocode('retry 5xx nantes')
+    expect(n).toBe(2)
+    expect(r).toHaveLength(1)
+  })
+
+  it('réessaie une fois après une erreur réseau, mais pas après un 404', async () => {
+    let n = 0
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        if (++n === 1) throw new TypeError('Failed to fetch')
+        return new Response(JSON.stringify(GEOCODE))
+      }),
+    )
+    expect(await geocode('retry reseau nantes')).toHaveLength(1)
+    expect(n).toBe(2)
+    const f404 = vi.fn(async () => new Response('', { status: 404 }))
+    vi.stubGlobal('fetch', f404)
+    await expect(geocode('introuvable 404')).rejects.toThrow(/404/)
+    expect(f404).toHaveBeenCalledTimes(1)
+  })
+
+  it('signal déjà annulé : AbortError sans appel réseau', async () => {
+    const calls = stubFetch([[/geocodage/, GEOCODE]])
+    const ctrl = new AbortController()
+    ctrl.abort()
+    await expect(geocode('adresse annulee', { signal: ctrl.signal })).rejects.toMatchObject({ name: 'AbortError' })
+    expect(calls).toHaveLength(0)
+  })
+
+  it('annulation pendant la requête : AbortError', async () => {
+    const ctrl = new AbortController()
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        (_u: string, init: RequestInit) =>
+          new Promise<Response>((_res, rej) => {
+            init.signal?.addEventListener('abort', () => rej(Object.assign(new Error('aborted'), { name: 'AbortError' })))
+          }),
+      ),
+    )
+    const pr = geocode('adresse en vol', { signal: ctrl.signal })
+    ctrl.abort()
+    await expect(pr).rejects.toMatchObject({ name: 'AbortError' })
   })
 })
 
@@ -174,6 +230,41 @@ describe('fetchParcel', () => {
     const p = await fetchParcel(center)
     expect(p?.ref).toBe('44109000BW0010')
     expect(calls[1]).toContain('/ext/geopf/wfs/ows?')
+  })
+
+  it('MultiPolygon à 2 anneaux : rings[0] est celui qui contient le point', () => {
+    const sq = (lon: number, lat: number, h = 0.0001) => [
+      [lon - h, lat - h], [lon + h, lat - h], [lon + h, lat + h], [lon - h, lat + h], [lon - h, lat - h],
+    ]
+    const A = sq(2.002, 48) // ≈ 150 m à l'est
+    const B = sq(2, 48) // contient le point
+    const fc = {
+      type: 'FeatureCollection' as const,
+      features: [
+        {
+          geometry: { type: 'MultiPolygon', coordinates: [[A], [B]] },
+          properties: { idu: 'X1', contenance: 500 },
+        },
+      ],
+    }
+    const hit = pickParcel(fc, { lon: 2, lat: 48 }, 0)
+    expect(hit?.ref).toBe('X1')
+    expect(hit?.rings).toHaveLength(2)
+    expect(hit?.rings[0][0]).toEqual({ lon: 1.9999, lat: 47.9999 }) // anneau B en premier
+  })
+
+  it('hors parcelle : rings[0] est l’anneau le plus proche', () => {
+    const sq = (lon: number, lat: number, h = 0.0001) => [
+      [lon - h, lat - h], [lon + h, lat - h], [lon + h, lat + h], [lon - h, lat + h], [lon - h, lat - h],
+    ]
+    const far = sq(2.01, 48)
+    const near = sq(2.0003, 48) // bord à ≈ 14 m
+    const fc = {
+      type: 'FeatureCollection' as const,
+      features: [{ geometry: { type: 'MultiPolygon', coordinates: [[far], [near]] }, properties: { idu: 'X2' } }],
+    }
+    expect(pickParcel(fc, { lon: 2, lat: 48 }, 30)?.rings[0][0].lon).toBeCloseTo(2.0002, 6)
+    expect(pickParcel(fc, { lon: 2, lat: 48 }, 5)).toBeNull()
   })
 
   it('null si rien à proximité', async () => {
@@ -279,5 +370,30 @@ describe('orthophoto', () => {
     const bbox = new URL(url, 'http://x').searchParams.get('BBOX')!.split(',').map(Number)
     expect(bbox[0]).toBeCloseTo(-170499.54, 1) // Xc − 50/cos(lat)
     expect(bbox[1]).toBeCloseTo(5978910.7, 0)
+  })
+
+  it('bornes : petites emprises valides, px plafonné à 2048', () => {
+    for (const h of [15, 30, 100]) {
+      const url = orthoTextureUrl(center, h)
+      const bbox = new URL(url, 'http://x').searchParams.get('BBOX')!.split(',').map(Number)
+      expect(bbox).toHaveLength(4)
+      expect(bbox.every(Number.isFinite)).toBe(true)
+      expect(bbox[2]).toBeGreaterThan(bbox[0])
+      expect(bbox[3]).toBeGreaterThan(bbox[1])
+      expect(bbox[2] - bbox[0]).toBeCloseTo((2 * h) / Math.cos((center.lat * Math.PI) / 180), 1)
+    }
+    expect(orthoTextureUrl(center, 15, 99999)).toContain('WIDTH=2048&HEIGHT=2048')
+    expect(orthoTextureUrl(center, 15, 1)).toContain('WIDTH=16&HEIGHT=16')
+    expect(orthoTextureUrl(center, 15, NaN)).toContain('WIDTH=1024&HEIGHT=1024')
+    expect(orthoTextureUrl(center, 0)).toContain('BBOX=') // emprise nulle : repli à 1 m
+    const b = new URL(orthoTextureUrl(center, 0), 'http://x').searchParams.get('BBOX')!.split(',').map(Number)
+    expect(b[2]).toBeGreaterThan(b[0])
+  })
+
+  it('zooms maximaux exportés', () => {
+    for (const z of [ORTHO_MAXZOOM, PLAN_MAXZOOM, CADASTRE_MAXZOOM]) {
+      expect(z).toBeGreaterThanOrEqual(18)
+      expect(z).toBeLessThanOrEqual(21)
+    }
   })
 })

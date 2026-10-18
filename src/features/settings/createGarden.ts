@@ -18,6 +18,24 @@ export const INITIAL_STEPS: Step[] = [
   { id: 'climat', label: 'Gelées et pluie sur 5 ans', state: 'attente' },
 ]
 
+/** Explication humaine d'un échec, par source : ce que l'utilisateur perd et quoi faire. */
+export const FAIL_HELP: Record<Step['id'], string> = {
+  parcelle: 'Parcelle non récupérée : le cadrage de la carte sera approximatif et les distances aux voisins ne seront pas vérifiées.',
+  batiments: "Bâtiments non récupérés : l'ombre des constructions voisines ne sera pas calculée.",
+  relief: 'Relief non récupéré : le terrain sera plat en 3D et la pente inconnue.',
+  climat: 'Climat non récupéré : le calendrier suivra les dates nationales, sans adaptation aux gelées locales.',
+}
+
+/** Sources manquantes d'un jardin existant (pour le bandeau « Réessayer »). */
+export function missingSources(g: Garden): Step['id'][] {
+  const out: Step['id'][] = []
+  if (!g.parcel?.length) out.push('parcelle')
+  if (g.buildings === undefined) out.push('batiments')
+  if (!g.terrain) out.push('relief')
+  if (g.lastFrostDoy == null && g.firstFrostDoy == null && !g.climateChecked) out.push('climat')
+  return out
+}
+
 export const SCENE_HALF_SIZE = 40
 
 /**
@@ -82,8 +100,8 @@ export async function buildGarden(
       onStep('climat', 'en-cours')
       try {
         const c = await fetchClimate(center)
-        garden.lastFrostDoy = c.lastFrostDoy
-        garden.firstFrostDoy = c.firstFrostDoy
+        garden.lastFrostDoy = c.lastFrostDoy ?? undefined
+        garden.firstFrostDoy = c.firstFrostDoy ?? undefined
         onStep('climat', 'ok', `${Math.round(c.rainMmPerYear)} mm/an · ${c.zone}`)
       } catch (e) {
         onStep('climat', 'echec', (e as Error).message)

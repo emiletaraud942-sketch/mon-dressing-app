@@ -22,6 +22,7 @@ const arrosageJeunes: TaskRule = {
   months: [6, 7, 8],
   condition: 'chaleur',
   frequencyDays: 7,
+  maxAgeYears: 2,
   howTo: 'Les deux premiers étés, arroser 10 à 15 L au pied en une fois plutôt que peu souvent, de préférence le soir et sous paillis.',
   tool: 'arrosoir',
 }
@@ -70,7 +71,7 @@ export const PETITS_FRUITS: Species[] = [
       plantationRacinesNues,
       {
         type: 'taille',
-        months: [8, 9],
+        months: [9, 10, 11],
         condition: 'apres-recolte',
         howTo: "Variétés non remontantes : couper au ras du sol toutes les cannes qui viennent de fructifier (bois brun qui sèche). Garder 6 à 8 jeunes cannes vigoureuses par mètre linéaire et les palisser.",
         tool: 'sécateur',
@@ -98,6 +99,7 @@ export const PETITS_FRUITS: Species[] = [
       {
         type: 'recolte',
         months: [6, 7, 8, 9, 10],
+        minAgeYears: 1,
         frequencyDays: 2,
         howTo: 'Cueillir tous les deux jours, par temps sec, les fruits qui se détachent sans effort de leur réceptacle.',
       },
@@ -153,6 +155,13 @@ export const PETITS_FRUITS: Species[] = [
         howTo: 'Pincer l’extrémité des jeunes cannes vers 2 m pour favoriser les ramifications fructifères.',
         tool: 'sécateur',
       },
+      {
+        type: 'recolte',
+        months: [8, 9],
+        frequencyDays: 3,
+        minAgeYears: 1,
+        howTo: "Cueillir les mûres noires et brillantes qui se détachent sans effort, tous les 3 jours ; les mûres rouges sont acides et ne mûrissent plus. Les consommer sous 2 jours, ou les congeler, en confiture ou en gelée.",
+      },
       paillageBrf,
     ],
     entretien:
@@ -203,6 +212,13 @@ export const PETITS_FRUITS: Species[] = [
         tool: 'sécateur',
       },
       filetOiseaux,
+      {
+        type: 'recolte',
+        months: [6, 7],
+        frequencyDays: 7,
+        minAgeYears: 2,
+        howTo: "Cueillir les grappes entières quand les baies sont bien colorées, en les coupant par la rafle au sécateur ou en les égrenant à la fourchette. Elles se conservent plusieurs jours au frais sur la grappe ; le surplus se congèle ou part en gelée.",
+      },
       paillageBrf,
       compostAutomne,
     ],
@@ -248,6 +264,7 @@ export const PETITS_FRUITS: Species[] = [
       {
         type: 'recolte',
         months: [7],
+        minAgeYears: 2,
         howTo: 'Cueillir les grappes entières quand toutes les baies sont noires et brillantes, ou égrapper sur l’arbuste en plusieurs passages.',
       },
       filetOiseaux,
@@ -306,6 +323,13 @@ export const PETITS_FRUITS: Species[] = [
         condition: 'temps-sec',
         howTo: 'Surveiller les fausses-chenilles de tenthrède qui dévorent les feuilles du centre : les ramasser à la main ou pulvériser un purin de tanaisie.',
         tool: 'pulvérisateur',
+      },
+      {
+        type: 'recolte',
+        months: [6, 7, 8],
+        frequencyDays: 7,
+        minAgeYears: 2,
+        howTo: "Cueillir à la main, avec des gants épais : un peu avant maturité (fermes, pour la confiture) ou bien mûres, translucides et sucrées (pour manger frais). Le fruit se détache avec sa petite queue.",
       },
       paillageBrf,
     ],
@@ -369,6 +393,13 @@ export const PETITS_FRUITS: Species[] = [
         howTo: "Renouveler chaque printemps un paillis acidifiant de 8 cm : aiguilles de pin, écorce de pin ou BRF de résineux.",
       },
       {
+        type: 'recolte',
+        months: [7, 8, 9],
+        frequencyDays: 4,
+        minAgeYears: 2,
+        howTo: "Cueillir les myrtilles bien bleues qui se détachent d'un léger roulement du pouce : elles mûrissent sur 4 à 6 semaines, repasser tous les 4 jours. Se conservent une semaine au réfrigérateur et se congèlent très bien.",
+      },
+      {
         type: 'protection',
         months: [7, 8],
         howTo: 'Couvrir d’un filet anti-oiseaux dès que les premières baies bleuissent.',
@@ -415,6 +446,13 @@ export const PETITS_FRUITS: Species[] = [
         tool: 'sécateur',
       },
       filetOiseaux,
+      {
+        type: 'recolte',
+        months: [7],
+        frequencyDays: 5,
+        minAgeYears: 2,
+        howTo: "Cueillir les baies quand elles sont bien colorées, en grappes ou une à une, en repassant tous les 5 jours car la maturité est échelonnée. À consommer frais, en gelée ou en sirop.",
+      },
       paillageBrf,
       arrosageJeunes,
     ],
@@ -472,6 +510,7 @@ export const PETITS_FRUITS: Species[] = [
       {
         type: 'recolte',
         months: [8, 9, 10],
+        minAgeYears: 2,
         frequencyDays: 7,
         howTo: "Cueillir les baies bien rouges en les détachant délicatement à la main : elles noircissent si on les écrase.",
       },
@@ -519,6 +558,7 @@ export const PETITS_FRUITS: Species[] = [
       {
         type: 'recolte',
         months: [8, 9],
+        minAgeYears: 3,
         howTo: 'Récolter les corymbes entiers quand les baies sont noires et légèrement molles ; elles sont astringentes crues et meilleures en jus, confiture ou séchées.',
         tool: 'sécateur',
       },
@@ -593,6 +633,7 @@ export const PETITS_FRUITS: Species[] = [
       {
         type: 'recolte',
         months: [10, 11],
+        minAgeYears: 3,
         howTo: 'Récolter avant les premières gelées, fruits encore durs, puis les laisser mûrir quelques semaines au frais à côté de pommes.',
       },
     ],
@@ -651,6 +692,7 @@ export const PETITS_FRUITS: Species[] = [
       {
         type: 'recolte',
         months: [9, 10],
+        minAgeYears: 3,
         frequencyDays: 7,
         howTo: 'Cueillir les petits fruits lisses quand ils cèdent sous le doigt, à consommer rapidement avec la peau.',
       },
@@ -722,6 +764,7 @@ export const PETITS_FRUITS: Species[] = [
       {
         type: 'recolte',
         months: [8, 9, 10],
+        minAgeYears: 3,
         howTo: 'Couper les grappes au sécateur quand les grains sont sucrés et les pépins bruns.',
         tool: 'sécateur',
       },
@@ -777,6 +820,13 @@ export const PETITS_FRUITS: Species[] = [
         months: [5, 6],
         howTo: 'Filet anti-oiseaux indispensable : les merles repèrent les baies avant qu’elles ne soient mûres.',
         tool: 'filet anti-oiseaux',
+      },
+      {
+        type: 'recolte',
+        months: [5, 6],
+        frequencyDays: 4,
+        minAgeYears: 2,
+        howTo: "Cueillir les baies allongées quand la pulpe est violette à l'intérieur (coupez-en une pour vérifier), pas seulement bleue à l'extérieur ; elles sont trop acides sinon. Étendre une bâche sous l'arbuste et secouer pour récolter plus vite.",
       },
       paillageBrf,
       arrosageJeunes,

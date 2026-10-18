@@ -29,6 +29,27 @@ export function formatDoy(doy: number): string {
 
 const sortMonths = (ms: Iterable<Month>): Month[] => [...new Set(ms)].sort((a, b) => a - b)
 
+export interface FrostGate {
+  lastFrostDoy: number
+  /** Premier mois sans risque de gel tardif. */
+  firstOk: Month
+  /** Ce mois de printemps est-il trop tôt pour une espèce gélive ? */
+  tooEarly: (m: Month) => boolean
+}
+
+/**
+ * Barrière des dernières gelées : seulement pour les espèces gélives et si la date locale est connue.
+ * Un mois de printemps est trop tôt si sa mi-mois tombe avant (dernière gelée + marge).
+ */
+export function frostGate(species: Species, garden: Garden): FrostGate | undefined {
+  if (species.rusticiteC <= GELIVE_C || garden.lastFrostDoy == null) return undefined
+  const safeDoy = garden.lastFrostDoy + FROST_MARGIN_DAYS
+  const tooEarly = (m: Month) => m <= 7 && doyOf(m, 15) < safeDoy
+  const safe = fromDoy(safeDoy)
+  const firstOk = (safe.day <= 15 ? safe.month : Math.min(12, safe.month + 1)) as Month
+  return { lastFrostDoy: garden.lastFrostDoy, firstOk, tooEarly }
+}
+
 export function plantingCalendar(
   species: Species,
   garden: Garden,
@@ -40,12 +61,9 @@ export function plantingCalendar(
   const notes: string[] = []
   const gelive = species.rusticiteC > GELIVE_C
 
-  if (gelive && garden.lastFrostDoy != null) {
-    const safeDoy = garden.lastFrostDoy + FROST_MARGIN_DAYS
-    // Un mois de printemps est trop tôt si sa mi-mois tombe avant la date sûre.
-    const tooEarly = (m: Month) => m <= 7 && doyOf(m, 15) < safeDoy
-    const safe = fromDoy(safeDoy)
-    const firstOk = (safe.day <= 15 ? safe.month : Math.min(12, safe.month + 1)) as Month
+  const gate = frostGate(species, garden)
+  if (gate) {
+    const { tooEarly, firstOk } = gate
     const shift = (ms: Month[]): { out: Month[]; moved: boolean } => {
       const moved = ms.some(tooEarly)
       return { out: sortMonths(ms.map((m) => (tooEarly(m) ? firstOk : m))), moved }
@@ -57,7 +75,7 @@ export function plantingCalendar(
     const what = [spt.moved && 'semis en pleine terre', pl.moved && 'plantation'].filter(Boolean).join(' et ')
     if (what) {
       notes.push(
-        `Dernières gelées vers le ${formatDoy(garden.lastFrostDoy)} chez vous : ${what} à partir de ${MONTH_NAMES[firstOk - 1]}.`,
+        `Dernières gelées vers le ${formatDoy(gate.lastFrostDoy)} chez vous : ${what} à partir de ${MONTH_NAMES[firstOk - 1]}.`,
       )
     }
   }

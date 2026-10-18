@@ -1,11 +1,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { computeClimate, dateToDoy, doyToLabel, fetchClimate, fetchWeather, parseForecast, usdaZone } from './weather'
+import { computeClimate, dateToDoy, doyToLabel, fetchClimate, fetchWeather, parseForecast, resliceBundle, todayLocal, usdaZone } from './weather'
 
 // Réponse réelle Open-Meteo (Nantes, 17/10/2026), sans les métadonnées.
 const FORECAST = {
   latitude: 47.23,
   longitude: -1.5300007,
   timezone: 'Europe/Paris',
+  utc_offset_seconds: 7200,
   daily: {
     time: ['2026-10-10', '2026-10-11', '2026-10-12', '2026-10-13', '2026-10-14', '2026-10-15', '2026-10-16',
       '2026-10-17', '2026-10-18', '2026-10-19', '2026-10-20', '2026-10-21', '2026-10-22', '2026-10-23'],
@@ -45,7 +46,21 @@ function synthArchive(years: { y: number; spring: string; autumn: string; min: n
   return { daily: { time, temperature_2m_min: tmin, temperature_2m_max: tmax, precipitation_sum: rain } }
 }
 
-afterEach(() => vi.unstubAllGlobals())
+/** localStorage minimal pour Node. */
+function stubStorage() {
+  const m = new Map<string, string>()
+  vi.stubGlobal('localStorage', {
+    getItem: (k: string) => m.get(k) ?? null,
+    setItem: (k: string, v: string) => void m.set(k, v),
+    removeItem: (k: string) => void m.delete(k),
+  })
+  return m
+}
+
+afterEach(() => {
+  vi.unstubAllGlobals()
+  vi.useRealTimers()
+})
 
 describe('prévisions', () => {
   it('sépare passé et prévisions autour d’aujourd’hui', () => {
@@ -65,16 +80,80 @@ describe('prévisions', () => {
   it('fetchWeather appelle le proxy avec les bons paramètres', async () => {
     const calls: string[] = []
     vi.stubGlobal('fetch', vi.fn(async (u: string) => (calls.push(u), new Response(JSON.stringify(FORECAST)))))
-    const b = await fetchWeather({ lon: -1.5308, lat: 47.2257 })
+    const b = await fetchWeather({ lon: -1.5308, lat: 47.2257 }, new Date('2026-10-17T10:00:00Z'))
     expect(b.past.length + b.forecast.length).toBe(14)
+    expect(b.forecast[0].date).toBe('2026-10-17')
+    expect(b.stale).toBeUndefined()
     expect(calls[0]).toMatch(/^\/ext\/meteo\/v1\/forecast\?latitude=47\.2257&longitude=-1\.5308/)
     expect(calls[0]).toContain('daily=temperature_2m_max,temperature_2m_min,precipitation_sum,et0_fao_evapotranspiration')
-    expect(calls[0]).toContain('past_days=7&forecast_days=7&timezone=Europe%2FParis')
+    expect(calls[0]).toContain('past_days=7&forecast_days=7&timezone=auto')
   })
 
   it('erreur HTTP en français', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ error: true, reason: 'Latitude invalide' }), { status: 400 })))
-    await expect(fetchWeather({ lon: 0, lat: 999 })).rejects.toThrow(/service météo.*400.*Latitude invalide/)
+    await expect(fetchWeather({ lon: 0, lat: 999 })).rejects.toThrow(/Open-Meteo.*400/)
+  })
+
+  it('réessaie une fois sur 5xx puis réussit', async () => {
+    let n = 0
+    vi.stubGlobal('fetch', vi.fn(async () => (++n === 1 ? new Response('', { status: 502 }) : new Response(JSON.stringify(FORECAST)))))
+    const b = await fetchWeather({ lon: 5, lat: 45 }, new Date('2026-10-17T10:00:00Z'))
+    expect(n).toBe(2)
+    expect(b.forecast).toHaveLength(7)
+  })
+
+  it('todayLocal suit le décalage du lieu', () => {
+    const now = new Date('2026-10-17T23:30:00Z')
+    expect(todayLocal(7200, now)).toBe('2026-10-18') // Paris (été)
+    expect(todayLocal(-4 * 3600, now)).toBe('2026-10-17') // Guadeloupe
+    expect(todayLocal(12 * 3600, now)).toBe('2026-10-18') // Nouvelle-Calédonie : +11 h
+  })
+
+  it('resliceBundle : les jours écoulés passent dans past (7 jours max)', () => {
+    const b = parseForecast(FORECAST, '2026-10-17', 'X')
+    const next = resliceBundle(b, '2026-10-18')
+    expect(next.past).toHaveLength(7)
+    expect(next.past[0].date).toBe('2026-10-11')
+    expect(next.past[6].date).toBe('2026-10-17')
+    expect(next.forecast).toHaveLength(6)
+    expect(next.forecast[0].date).toBe('2026-10-18')
+    expect(next.fetchedAt).toBe('X')
+  })
+
+  it('cache : re-découpé à la lecture selon la date du jour, sans nouvel appel', async () => {
+    stubStorage()
+    const f = vi.fn(async () => new Response(JSON.stringify(FORECAST)))
+    vi.stubGlobal('fetch', f)
+    const p = { lon: -1.5308, lat: 47.2257 }
+    const a = await fetchWeather(p, new Date('2026-10-17T10:00:00Z'))
+    expect(a.forecast[0].date).toBe('2026-10-17')
+    const b = await fetchWeather(p, new Date('2026-10-18T09:00:00Z')) // le lendemain, dans le TTL
+    expect(f).toHaveBeenCalledTimes(1)
+    expect(b.forecast[0].date).toBe('2026-10-18')
+    expect(b.past).toHaveLength(7)
+    expect(b.past[6].date).toBe('2026-10-17')
+    expect(b.stale).toBeUndefined()
+  })
+
+  it('cache expiré + réseau en panne : repli stale avec fetchedAt d’origine', async () => {
+    stubStorage()
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-10-17T10:00:00Z'))
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify(FORECAST))))
+    const p = { lon: -1.5308, lat: 47.2257 }
+    const a = await fetchWeather(p)
+    vi.setSystemTime(new Date('2026-10-17T15:00:00Z')) // > 3 h
+    vi.stubGlobal('fetch', vi.fn(async () => { throw new TypeError('offline') }))
+    const b = await fetchWeather(p)
+    expect(b.stale).toBe(true)
+    expect(b.fetchedAt).toBe(a.fetchedAt)
+    expect(b.forecast[0].date).toBe('2026-10-17')
+  })
+
+  it('sans cache et réseau en panne : erreur en français', async () => {
+    stubStorage()
+    vi.stubGlobal('fetch', vi.fn(async () => { throw new TypeError('offline') }))
+    await expect(fetchWeather({ lon: 9, lat: 9 })).rejects.toThrow(/Connexion impossible/)
   })
 })
 
@@ -110,6 +189,27 @@ describe('climat', () => {
     expect(c.zone).toBe('Rusticité USDA 8a') // moyenne -10 °C
   })
 
+  it('gelées : moyenne sur les seules années avec gel, null si aucune', () => {
+    // 2023 sans gel au printemps ni à l'automne (min toujours 5), 2024 avec gel.
+    const noFrost = synthArchive([{ y: 2023, spring: '', autumn: '', min: 5 }])
+    const withFrost = synthArchive([{ y: 2024, spring: '2024-04-06', autumn: '2024-11-20', min: -2 }])
+    const mixed = {
+      daily: {
+        time: [...noFrost.daily.time, ...withFrost.daily.time],
+        temperature_2m_min: [...noFrost.daily.temperature_2m_min, ...withFrost.daily.temperature_2m_min],
+        temperature_2m_max: [...noFrost.daily.temperature_2m_max, ...withFrost.daily.temperature_2m_max],
+        precipitation_sum: [...noFrost.daily.precipitation_sum, ...withFrost.daily.precipitation_sum],
+      },
+    }
+    const m = computeClimate(mixed)
+    expect(m.years).toBe(2)
+    expect(m.lastFrostDoy).toBe(97) // pas de dilution par l'année sans gel
+    expect(m.firstFrostDoy).toBe(325)
+    const none = computeClimate(noFrost)
+    expect(none.lastFrostDoy).toBeNull()
+    expect(none.firstFrostDoy).toBeNull()
+  })
+
   it('année incomplète (extrait réel) refusée', () => {
     expect(() => computeClimate(ARCHIVE_SNIPPET)).toThrow(/insuffisant/)
   })
@@ -120,9 +220,9 @@ describe('climat', () => {
     vi.stubGlobal('fetch', vi.fn(async (u: string) => (calls.push(u), new Response(body))))
     const c = await fetchClimate({ lon: -1.5308, lat: 47.2257 })
     expect(c.lastFrostDoy).toBe(60)
-    const year = Number(new Date().toLocaleDateString('sv-SE', { timeZone: 'Europe/Paris' }).slice(0, 4))
+    const year = new Date().getFullYear()
     expect(calls[0]).toMatch(/^\/ext\/meteo-archive\/v1\/archive\?latitude=47\.2257&longitude=-1\.5308/)
     expect(calls[0]).toContain(`start_date=${year - 5}-01-01&end_date=${year - 1}-12-31`)
-    expect(calls[0]).toContain('daily=temperature_2m_min,temperature_2m_max,precipitation_sum')
+    expect(calls[0]).toContain('daily=temperature_2m_min,temperature_2m_max,precipitation_sum&timezone=auto')
   })
 })

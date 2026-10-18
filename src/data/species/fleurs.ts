@@ -430,7 +430,7 @@ export const FLEURS: Species[] = [
     semisPleineTerre: [3, 4, 8, 9],
     taches: [
       { type: 'semis', months: [3, 4, 8, 9], howTo: "Semez à la volée (2 g/m²) juste après une récolte d'été, ratissez et plombez. Elle lève en 3 jours et couvre le sol en un mois.", tool: 'râteau' },
-      { type: 'taille', months: [5, 10, 11], howTo: "Fauchez avant la floraison, 6 à 8 semaines après le semis, puis hachez et laissez en surface ou incorporez superficiellement.", tool: 'faucille' },
+      { type: 'taille', months: [5, 6, 10, 11], howTo: "Fauchez avant la floraison, 6 à 8 semaines après le semis, puis hachez et laissez en surface ou incorporez superficiellement.", tool: 'faucille' },
     ],
     entretien: "La moutarde blanche pousse très vite et capte l'azote qui serait lessivé par les pluies d'automne. Fauchez-la avant qu'elle ne graine, sinon elle se ressème partout. C'est une brassicacée : ne la semez pas avant des choux, navets ou radis, pour ne pas entretenir la hernie et les altises.",
     couleur: '#6a9a3a',
@@ -592,6 +592,7 @@ export const FLEURS: Species[] = [
     taches: [
       { type: 'semis', months: [5, 6, 7, 8], condition: 'hors-gel', howTo: "Semez à la volée (6 à 8 g/m²) sur sol réchauffé, ratissez et plombez. Il couvre le sol en 3 semaines et étouffe le chiendent.", tool: 'râteau' },
       { type: 'taille', months: [7, 8, 9], howTo: "Fauchez au début de la floraison, 6 à 8 semaines après le semis, avant que les graines ne se forment. Laissez en paillage.", tool: 'faucille' },
+      { type: 'recolte', months: [8, 9, 10], condition: 'temps-sec', howTo: "Pour la farine, laissez grainer une partie du semis : coupez les tiges quand les trois quarts des graines sont brunes, faites sécher les bottes à l'abri puis battez-les sur une bâche. Les graines tombent à maturité : ne tardez pas.", tool: 'faucille' },
     ],
     entretien: "Le sarrasin est l'engrais vert d'été idéal entre deux cultures : il pousse en quelques semaines, même en sol pauvre et acide. Il rend le phosphore disponible et ses fleurs blanches nourrissent abeilles et syrphes. Gélif, il meurt au premier gel et se décompose sur place.",
     couleur: '#5a8a3a',

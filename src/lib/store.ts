@@ -1,6 +1,8 @@
 import { get, set } from 'idb-keyval'
 import { useMemo, useSyncExternalStore } from 'react'
 import type { Garden, Plant, TaskDone } from '../types'
+import { compactTasksDone, migrateState, STATE_VERSION, type StateData } from './migrate'
+import { deletePhoto, listPhotoIds } from './photos'
 
 export interface AppState {
   gardens: Garden[]
@@ -10,33 +12,239 @@ export interface AppState {
   loaded: boolean
 }
 
+/** État du stockage local, pour que l'interface prévienne l'utilisateur. */
+export interface StorageStatus {
+  /** Stockage protégé contre l'effacement automatique par le navigateur (undefined = inconnu). */
+  persistent: boolean | undefined
+  /** Lecture impossible au chargement : rien n'est écrit tant que l'utilisateur n'a pas confirmé (`resumeSaving`) ou réimporté. */
+  readFailed: boolean
+  /** Dernière écriture échouée (stockage plein, navigation privée…). */
+  writeError?: string
+}
+
 const KEY = 'permajardin:state:v1'
+const BACKUP_KEY = KEY + ':avant-migration'
+const WRITE_ERROR = "Impossible d'enregistrer sur cet appareil (stockage plein ou bloqué). Exportez une sauvegarde depuis les réglages."
+
 let state: AppState = { gardens: [], plants: [], tasksDone: [], loaded: false }
+let status: StorageStatus = { persistent: undefined, readFailed: false }
+let loadWarnings: string[] = []
 const listeners = new Set<() => void>()
 
 function emit() {
   listeners.forEach((l) => l())
 }
 
+function setStatus(patch: Partial<StorageStatus>) {
+  const next = { ...status, ...patch }
+  if (next.writeError === undefined) delete next.writeError
+  if (next.persistent === status.persistent && next.readFailed === status.readFailed && next.writeError === status.writeError) return
+  status = next
+  emit()
+}
+
+export function getStorageStatus(): StorageStatus {
+  return status
+}
+
+/** Avertissements de la dernière migration/validation des données stockées (en français). */
+export function getLoadWarnings(): string[] {
+  return loadWarnings
+}
+
+// ---------- Écriture ----------
+
 let saveTimer: ReturnType<typeof setTimeout> | undefined
+let dirty = false
+
 function persist() {
+  dirty = true
+  if (status.readFailed) return // jamais d'écriture par-dessus des données qu'on n'a pas pu lire
   clearTimeout(saveTimer)
-  saveTimer = setTimeout(() => {
-    const { loaded: _loaded, ...data } = state
-    set(KEY, data).catch((e) => console.warn('Sauvegarde impossible', e))
-  }, 200)
+  saveTimer = setTimeout(flush, 200)
+}
+
+/** Écrit tout de suite l'état en attente (appelé aussi sur `pagehide` et quand la page passe en arrière-plan). */
+export function flush() {
+  clearTimeout(saveTimer)
+  saveTimer = undefined
+  if (!dirty || !state.loaded || status.readFailed) return
+  dirty = false
+  const data = { version: STATE_VERSION, gardens: state.gardens, plants: state.plants, tasksDone: state.tasksDone, activeGardenId: state.activeGardenId }
+  set(KEY, data).then(
+    () => {
+      setStatus({ writeError: undefined })
+      channel?.postMessage({ type: 'saved' })
+    },
+    (e) => {
+      console.warn('Sauvegarde impossible', e)
+      dirty = true // sera retenté à la prochaine modification ou au prochain flush
+      setStatus({ writeError: WRITE_ERROR })
+    },
+  )
+}
+
+// ---------- Cycle de vie, onglets multiples ----------
+
+let channel: BroadcastChannel | undefined
+let lifecycleReady = false
+
+function initLifecycle() {
+  if (lifecycleReady) return
+  lifecycleReady = true
+  if (typeof window !== 'undefined') window.addEventListener('pagehide', flush)
+  if (typeof document !== 'undefined') {
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'hidden') flush()
+    })
+  }
+  if (typeof BroadcastChannel !== 'undefined') {
+    try {
+      channel = new BroadcastChannel('permajardin')
+      ;(channel as unknown as { unref?: () => void }).unref?.()
+      // Un autre onglet a écrit : on se met à jour (dernier écrivain gagne), sauf si on a des changements en attente.
+      channel.onmessage = (e: MessageEvent) => {
+        if ((e.data as { type?: string } | null)?.type !== 'saved' || dirty || status.readFailed) return
+        void reloadFromStorage()
+      }
+    } catch {
+      channel = undefined
+    }
+  }
+}
+
+async function requestPersistence() {
+  try {
+    const storage = typeof navigator !== 'undefined' ? navigator.storage : undefined
+    if (!storage?.persist) return
+    const already = storage.persisted ? await storage.persisted() : false
+    setStatus({ persistent: already || (await storage.persist()) })
+  } catch {
+    /* non pris en charge ou refusé : on laisse « inconnu » */
+  }
+}
+
+const validActive = (gardens: Garden[], id?: string) => (id && gardens.some((g) => g.id === id) ? id : gardens[0]?.id)
+
+type Read = { kind: 'empty' } | { kind: 'failed' } | { kind: 'ok'; raw: Record<string, unknown>; data: StateData; warnings: string[] }
+
+async function readStored(): Promise<Read> {
+  let raw: unknown
+  try {
+    raw = await get(KEY)
+  } catch (e) {
+    console.warn('Lecture impossible', e)
+    return { kind: 'failed' }
+  }
+  if (raw === undefined || raw === null) return { kind: 'empty' }
+  const r = migrateState(raw)
+  if (!r.ok) {
+    console.warn('Données stockées inutilisables :', r.error)
+    return { kind: 'failed' }
+  }
+  return { kind: 'ok', raw: raw as Record<string, unknown>, data: r.data, warnings: r.warnings }
+}
+
+async function reloadFromStorage() {
+  const read = await readStored()
+  if (read.kind !== 'ok' || dirty) return
+  state = { ...state, ...read.data, activeGardenId: validActive(read.data.gardens, state.activeGardenId ?? (read.raw.activeGardenId as string | undefined)) }
+  emit()
 }
 
 export async function loadState() {
-  try {
-    const data = (await get(KEY)) as Omit<AppState, 'loaded'> | undefined
-    if (data) state = { ...state, ...data }
-  } catch (e) {
-    console.warn('Lecture impossible', e)
+  initLifecycle()
+  void requestPersistence()
+  const read = await readStored()
+  if (read.kind === 'failed') {
+    state = { ...state, loaded: true }
+    dirty = false
+    setStatus({ readFailed: true })
+    emit()
+    return
   }
-  state = { ...state, loaded: true }
-  emit()
+  if (read.kind === 'ok') {
+    const tasksDone = compactTasksDone(read.data.tasksDone)
+    loadWarnings = read.warnings
+    state = {
+      ...state,
+      ...read.data,
+      tasksDone,
+      activeGardenId: validActive(read.data.gardens, read.raw.activeGardenId as string | undefined),
+      loaded: true,
+    }
+    dirty = false
+    setStatus({ readFailed: false })
+    emit()
+    if (read.warnings.length > 0) {
+      // On garde l'original avant de réécrire une version corrigée.
+      await set(BACKUP_KEY, read.raw).catch(() => undefined)
+    }
+    if (read.warnings.length > 0 || read.raw.version !== STATE_VERSION || tasksDone !== read.data.tasksDone) persist()
+  } else {
+    state = { ...state, loaded: true }
+    dirty = false
+    setStatus({ readFailed: false })
+    emit()
+  }
+  void purgeOrphanPhotos()
 }
+
+/** Nouvelle tentative de lecture après un échec ; lève le blocage si elle réussit. */
+export async function retryLoadState() {
+  const read = await readStored()
+  if (read.kind === 'failed') return
+  dirty = false
+  clearTimeout(saveTimer)
+  if (read.kind === 'ok') {
+    loadWarnings = read.warnings
+    state = { ...state, ...read.data, tasksDone: compactTasksDone(read.data.tasksDone), activeGardenId: validActive(read.data.gardens, read.raw.activeGardenId as string | undefined), loaded: true }
+  } else {
+    state = { ...state, gardens: [], plants: [], tasksDone: [], activeGardenId: undefined, loaded: true }
+  }
+  setStatus({ readFailed: false })
+  emit()
+  void purgeOrphanPhotos()
+}
+
+/** L'utilisateur accepte de continuer malgré l'échec de lecture : l'état actuel remplacera ce qui est stocké. */
+export function resumeSaving() {
+  if (!status.readFailed) return
+  setStatus({ readFailed: false })
+  persist()
+}
+
+/** Supprime les photos d'IndexedDB qu'aucune plante ne référence (restes de suppressions ou d'imports). */
+export async function purgeOrphanPhotos(): Promise<number> {
+  if (!state.loaded || status.readFailed) return 0
+  try {
+    const refs = new Set(state.plants.flatMap((p) => p.photos))
+    // Références déjà enregistrées (autre onglet qui vient d'écrire).
+    const stored = (await get(KEY)) as { plants?: { photos?: unknown }[] } | undefined
+    for (const p of Array.isArray(stored?.plants) ? stored.plants : []) {
+      if (Array.isArray(p?.photos)) for (const id of p.photos) if (typeof id === 'string') refs.add(id)
+    }
+    let n = 0
+    for (const id of await listPhotoIds()) {
+      if (refs.has(id)) continue
+      await deletePhoto(id)
+      n++
+    }
+    return n
+  } catch (e) {
+    console.warn('Nettoyage des photos impossible', e)
+    return 0
+  }
+}
+
+function dropPhotos(plants: Plant[], stillUsedBy: Plant[]) {
+  const keep = new Set(stillUsedBy.flatMap((p) => p.photos))
+  for (const id of new Set(plants.flatMap((p) => p.photos))) {
+    if (!keep.has(id)) deletePhoto(id).catch(() => undefined)
+  }
+}
+
+// ---------- Accès à l'état ----------
 
 export function getState() {
   return state
@@ -48,14 +256,20 @@ export function setState(update: (s: AppState) => Partial<AppState>) {
   persist()
 }
 
+function subscribe(l: () => void) {
+  listeners.add(l)
+  return () => {
+    listeners.delete(l)
+  }
+}
+
 export function useStore<T>(selector: (s: AppState) => T): T {
-  return useSyncExternalStore(
-    (l) => {
-      listeners.add(l)
-      return () => listeners.delete(l)
-    },
-    () => selector(state),
-  )
+  return useSyncExternalStore(subscribe, () => selector(state))
+}
+
+/** État du stockage (persistance, lecture/écriture en échec) pour avertir l'utilisateur. */
+export function useStorageStatus(): StorageStatus {
+  return useSyncExternalStore(subscribe, getStorageStatus)
 }
 
 // ---------- Actions ----------
@@ -78,6 +292,7 @@ export function updateGarden(id: string, patch: Partial<Garden>) {
 }
 
 export function removeGarden(id: string) {
+  const removed = state.plants.filter((p) => p.gardenId === id)
   setState((s) => {
     const gardens = s.gardens.filter((g) => g.id !== id)
     return {
@@ -87,6 +302,7 @@ export function removeGarden(id: string) {
       activeGardenId: s.activeGardenId === id ? gardens[0]?.id : s.activeGardenId,
     }
   })
+  dropPhotos(removed, state.plants)
 }
 
 export function setActiveGarden(id: string) {
@@ -101,8 +317,11 @@ export function updatePlant(id: string, patch: Partial<Plant>) {
   setState((s) => ({ plants: s.plants.map((p) => (p.id === id ? { ...p, ...patch } : p)) }))
 }
 
-export function removePlant(id: string) {
+/** Retire une plante et ses photos. `keepPhotos` : garde les photos (pour pouvoir annuler ; les orphelines sont purgées au prochain démarrage). */
+export function removePlant(id: string, opts: { keepPhotos?: boolean } = {}) {
+  const removed = state.plants.filter((p) => p.id === id)
   setState((s) => ({ plants: s.plants.filter((p) => p.id !== id) }))
+  if (!opts.keepPhotos) dropPhotos(removed, state.plants)
 }
 
 export function markTaskDone(t: TaskDone) {
@@ -113,7 +332,15 @@ export function unmarkTask(gardenId: string, taskKey: string) {
   setState((s) => ({ tasksDone: s.tasksDone.filter((t) => !(t.gardenId === gardenId && t.taskKey === taskKey)) }))
 }
 
-/** Remplace tout l'état (import d'une sauvegarde ou synchro). */
+/**
+ * Remplace tout l'état (import d'une sauvegarde ou synchro ; données déjà passées par `migrateState`).
+ * Action explicite : lève aussi le blocage d'écriture après un échec de lecture.
+ */
 export function replaceData(data: Pick<AppState, 'gardens' | 'plants' | 'tasksDone'>) {
-  setState(() => ({ ...data, activeGardenId: data.gardens[0]?.id }))
+  const previous = state.plants
+  state = { ...state, ...data, tasksDone: compactTasksDone(data.tasksDone), activeGardenId: data.gardens[0]?.id }
+  setStatus({ readFailed: false })
+  emit()
+  persist()
+  dropPhotos(previous, state.plants)
 }

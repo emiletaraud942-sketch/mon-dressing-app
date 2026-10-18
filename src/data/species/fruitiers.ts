@@ -23,6 +23,7 @@ const arrosageJeunes: TaskRule = {
   months: [6, 7, 8],
   condition: 'chaleur',
   frequencyDays: 10,
+  maxAgeYears: 3,
   howTo: 'Pendant les 2 à 3 étés suivant la plantation, apporter 20 à 30 L au pied en une seule fois, dans une cuvette, plutôt que de petits arrosages.',
   tool: 'arrosoir',
 }
@@ -98,9 +99,15 @@ export const FRUITIERS: Species[] = [
       {
         type: 'taille',
         months: [6],
-        minAgeYears: 4,
+        minAgeYears: 3,
         howTo: "Éclaircissage après la chute naturelle de juin : ne garder qu'un ou deux fruits par bouquet, 15 cm entre fruits, en éliminant d'abord les fruits piqués ou difformes.",
         tool: 'ciseaux',
+      },
+      {
+        type: 'recolte',
+        months: [8, 9, 10],
+        minAgeYears: 3,
+        howTo: "Cueillir quand le fruit se détache en le soulevant et en le tournant, que les pépins brunissent et que le fond de la peau vire au jaune. Manipuler sans marquer le fruit ; les variétés de garde se rangent à plat, sans contact, en cave fraîche et humide.",
       },
       bouillieChuteFeuilles,
       compostAutomne,
@@ -159,6 +166,12 @@ export const FRUITIERS: Species[] = [
         howTo: "Feu bactérien : couper tout rameau noirci recourbé en crosse 30 cm sous la zone atteinte, désinfecter l'outil après chaque coupe et brûler les déchets.",
         tool: 'sécateur',
       },
+      {
+        type: 'recolte',
+        months: [8, 9, 10],
+        minAgeYears: 4,
+        howTo: "Cueillir les poires un peu avant maturité complète, quand elles se détachent d'une légère torsion ; elles finissent de mûrir au fruitier, à l'abri de la lumière. Celles d'été se consomment vite, celles d'automne et d'hiver se conservent en cave.",
+      },
       bouillieChuteFeuilles,
       compostAutomne,
       arrosageJeunes,
@@ -198,7 +211,7 @@ export const FRUITIERS: Species[] = [
       {
         type: 'taille',
         months: [7, 8],
-        condition: 'temps-sec',
+        condition: 'apres-recolte',
         howTo: "Toujours juste après la récolte, par temps sec, jamais en hiver (chancre bactérien, gommose et plomb parasite entrent par les plaies). Supprimer le bois mort, les branches qui se croisent ou trop basses ; tailler peu. Appliquer un mastic cicatrisant sur les coupes de plus de 3 cm.",
         tool: 'scie d’élagage',
       },
@@ -212,6 +225,7 @@ export const FRUITIERS: Species[] = [
         type: 'recolte',
         months: [5, 6, 7],
         frequencyDays: 3,
+        minAgeYears: 4,
         howTo: 'Cueillir les cerises avec leur queue, par temps sec, quand elles sont bien colorées.',
       },
       paillagePied,
@@ -252,8 +266,8 @@ export const FRUITIERS: Species[] = [
       plantationRacinesNues,
       {
         type: 'taille',
-        months: [8, 9],
-        condition: 'temps-sec',
+        months: [9, 10],
+        condition: 'apres-recolte',
         howTo: "Après la récolte, par temps sec : éclaircir le centre, supprimer bois mort et branches mal placées, raccourcir les rameaux trop longs. Éviter la taille d'hiver qui favorise le plomb parasite et la gommose ; mastiquer les grosses plaies.",
         tool: 'sécateur',
       },
@@ -268,6 +282,13 @@ export const FRUITIERS: Species[] = [
         months: [5, 6, 7, 8],
         condition: 'temps-sec',
         howTo: 'Contre la moniliose, retirer les fruits pourris ou momifiés sur l’arbre et au sol et les détruire.',
+      },
+      {
+        type: 'recolte',
+        months: [7, 8, 9],
+        frequencyDays: 3,
+        minAgeYears: 3,
+        howTo: "Cueillir les prunes quand elles cèdent légèrement sous le doigt et se détachent avec leur queue, en repassant tous les 3 jours car la maturité est échelonnée. Les consommer vite ou les cuire en compote, confiture ou pruneaux.",
       },
       paillagePied,
       compostAutomne,
@@ -307,8 +328,8 @@ export const FRUITIERS: Species[] = [
       plantationRacinesNues,
       {
         type: 'taille',
-        months: [8, 9],
-        condition: 'temps-sec',
+        months: [9, 10],
+        condition: 'apres-recolte',
         howTo: "Taille légère après la récolte, par temps sec : aérer le centre et supprimer bois mort et rameaux qui se croisent. Pas de taille d'hiver (plomb parasite).",
         tool: 'sécateur',
       },
@@ -316,6 +337,7 @@ export const FRUITIERS: Species[] = [
         type: 'recolte',
         months: [8, 9],
         frequencyDays: 3,
+        minAgeYears: 3,
         howTo: 'Secouer doucement les branches au-dessus d’une bâche : les mirabelles mûres tombent seules.',
       },
       paillagePied,
@@ -357,7 +379,7 @@ export const FRUITIERS: Species[] = [
       {
         type: 'taille',
         months: [8, 9],
-        condition: 'temps-sec',
+        condition: 'apres-recolte',
         howTo: "Jamais en hiver : tailler après la récolte, par temps sec, pour éviter gommose et dépérissement bactérien. Éclaircir le centre en gobelet, supprimer le bois mort et raccourcir légèrement les rameaux trop longs.",
         tool: 'sécateur',
       },
@@ -373,6 +395,13 @@ export const FRUITIERS: Species[] = [
         condition: 'temps-sec',
         howTo: 'Contre la moniliose, couper les rameaux desséchés après floraison 10 cm sous la partie atteinte et les brûler.',
         tool: 'sécateur',
+      },
+      {
+        type: 'recolte',
+        months: [6, 7, 8],
+        frequencyDays: 3,
+        minAgeYears: 3,
+        howTo: "Cueillir les abricots entièrement colorés, qui cèdent légèrement sous le doigt et se détachent d'une torsion ; en repassant tous les 3 jours car la maturité est échelonnée. Les poser à plat dans une cagette, sans les empiler, et les manger sous 3 à 4 jours.",
       },
       bouillieChuteFeuilles,
       paillagePied,
@@ -419,9 +448,9 @@ export const FRUITIERS: Species[] = [
       },
       {
         type: 'taille',
-        months: [8, 9],
-        condition: 'temps-sec',
-        howTo: 'Après la récolte, couper les rameaux qui ont fructifié au-dessus de la pousse de remplacement la plus proche de la base.',
+        months: [9, 10],
+        condition: 'apres-recolte',
+        howTo: 'Après la récolte, par temps sec, couper les rameaux qui ont fructifié au-dessus de la pousse de remplacement la plus proche de la base.',
         tool: 'sécateur',
       },
       {
@@ -434,8 +463,15 @@ export const FRUITIERS: Species[] = [
       {
         type: 'taille',
         months: [6],
-        minAgeYears: 3,
+        minAgeYears: 2,
         howTo: 'Éclaircir les jeunes fruits pour n’en garder qu’un tous les 15 cm : ils seront plus gros et l’arbre ne s’épuisera pas.',
+      },
+      {
+        type: 'recolte',
+        months: [7, 8, 9],
+        frequencyDays: 3,
+        minAgeYears: 2,
+        howTo: "Cueillir les pêches quand le fond de la peau vire au jaune ou au crème et que le fruit cède légèrement près du pédoncule, d'un quart de tour sans tirer. Les poser sans les presser et les consommer sous quelques jours.",
       },
       paillagePied,
       arrosageJeunes,
@@ -489,6 +525,7 @@ export const FRUITIERS: Species[] = [
       {
         type: 'recolte',
         months: [10, 11],
+        minAgeYears: 4,
         howTo: 'Cueillir les coings quand leur duvet s’efface et qu’ils deviennent jaune d’or, avant les gelées.',
       },
       paillagePied,
@@ -553,6 +590,7 @@ export const FRUITIERS: Species[] = [
       {
         type: 'recolte',
         months: [7, 8, 9, 10],
+        minAgeYears: 2,
         frequencyDays: 2,
         howTo: 'Cueillir les figues molles, qui penchent sur leur pédoncule et dont la peau se fendille.',
       },
@@ -611,6 +649,7 @@ export const FRUITIERS: Species[] = [
       {
         type: 'recolte',
         months: [9, 10],
+        minAgeYears: 8,
         frequencyDays: 3,
         howTo: 'Ramasser les noix tombées tous les 2–3 jours, les débarrasser du brou (gants : il tache) et les faire sécher en couche mince à l’abri.',
       },
@@ -660,6 +699,7 @@ export const FRUITIERS: Species[] = [
       {
         type: 'recolte',
         months: [8, 9, 10],
+        minAgeYears: 3,
         frequencyDays: 4,
         howTo: 'Ramasser les noisettes tombées au sol ou secouer les branches quand l’involucre brunit, avant les écureuils.',
       },
@@ -708,6 +748,7 @@ export const FRUITIERS: Species[] = [
       {
         type: 'recolte',
         months: [10, 11],
+        minAgeYears: 6,
         frequencyDays: 3,
         howTo: 'Ramasser les châtaignes tombées avec des gants épais, en écrasant les bogues sous le pied.',
       },
@@ -748,8 +789,8 @@ export const FRUITIERS: Species[] = [
       plantationRacinesNues,
       {
         type: 'taille',
-        months: [8, 9],
-        condition: 'temps-sec',
+        months: [9, 10],
+        condition: 'apres-recolte',
         howTo: "Après la récolte, par temps sec : former un gobelet ouvert, supprimer bois mort et rameaux qui se croisent. Peu de taille ; jamais en hiver humide (gommose).",
         tool: 'sécateur',
       },
@@ -763,6 +804,7 @@ export const FRUITIERS: Species[] = [
       {
         type: 'recolte',
         months: [8, 9],
+        minAgeYears: 4,
         howTo: 'Gauler quand la coque verte s’ouvre et sèche, puis décortiquer et faire sécher les amandes au soleil.',
         tool: 'gaule',
       },
@@ -816,6 +858,7 @@ export const FRUITIERS: Species[] = [
       {
         type: 'recolte',
         months: [10, 11, 12],
+        minAgeYears: 3,
         howTo: 'Cueillir les kakis encore fermes après la chute des feuilles, avec le pédoncule, et les laisser blettir à l’intérieur.',
         tool: 'sécateur',
       },
@@ -864,6 +907,7 @@ export const FRUITIERS: Species[] = [
       {
         type: 'recolte',
         months: [10, 11],
+        minAgeYears: 4,
         howTo: 'Cueillir les nèfles après les premières gelées et les laisser blettir sur de la paille jusqu’à ce que la chair brunisse.',
       },
       paillagePied,
@@ -909,6 +953,7 @@ export const FRUITIERS: Species[] = [
       {
         type: 'recolte',
         months: [7, 8, 9],
+        minAgeYears: 5,
         frequencyDays: 2,
         howTo: 'Étendre une bâche sous l’arbre et secouer doucement : les mûres mûres tombent. Attention, leur jus tache durablement.',
       },
@@ -975,6 +1020,7 @@ export const FRUITIERS: Species[] = [
       {
         type: 'recolte',
         months: [10, 11, 12],
+        minAgeYears: 4,
         howTo: 'Peigner les branches au-dessus d’un filet ; les olives doivent être désamérisées (saumure) avant consommation.',
         tool: 'peigne à olives',
       },
@@ -1027,6 +1073,7 @@ export const FRUITIERS: Species[] = [
       {
         type: 'recolte',
         months: [9, 10, 11],
+        minAgeYears: 3,
         howTo: 'Couper les grenades au sécateur quand la peau est bien colorée et sonne creux, avant qu’elles n’éclatent sous la pluie.',
         tool: 'sécateur',
       },
@@ -1079,6 +1126,7 @@ export const FRUITIERS: Species[] = [
       {
         type: 'recolte',
         months: [9, 10],
+        minAgeYears: 4,
         frequencyDays: 3,
         howTo: 'Cueillir les fruits quand ils cèdent sous le doigt et dégagent un parfum de banane-mangue ; ils se conservent peu.',
       },
@@ -1124,10 +1172,10 @@ export const FRUITIERS: Species[] = [
         tool: 'bêche',
       },
       {
-        type: 'taille',
+        type: 'recolte',
         months: [8, 9, 10],
-        condition: 'apres-recolte',
-        howTo: "Récolter en coupant les rameaux chargés de baies (puis les congeler pour détacher les fruits) : c'est la taille de fructification. Supprimer les drageons qui s'éloignent. Gants épais : épines acérées.",
+        minAgeYears: 3,
+        howTo: "Couper les rameaux chargés de baies au sécateur, puis les congeler quelques heures pour détacher facilement les fruits : c'est la méthode la plus simple et elle fait office de taille de fructification. Gants épais : épines acérées.",
         tool: 'sécateur',
       },
       {
@@ -1135,7 +1183,7 @@ export const FRUITIERS: Species[] = [
         months: [12, 1, 2],
         condition: 'hors-gel',
         minAgeYears: 5,
-        howTo: 'Tous les 3–4 ans, recéper au ras du sol une ou deux vieilles tiges dégarnies.',
+        howTo: 'Tous les 3–4 ans, recéper au ras du sol une ou deux vieilles tiges dégarnies et arracher les drageons qui s’éloignent du pied.',
         tool: 'ébrancheur',
       },
       arrosageJeunes,
