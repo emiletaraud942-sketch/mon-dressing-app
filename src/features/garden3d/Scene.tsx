@@ -10,6 +10,9 @@ import { Plants, type PlantPointerHandlers } from './Plants'
 import { buildPlantScene } from './plantModel'
 import { makeHeightSampler } from './terrain'
 import type { SunState } from './sun'
+import { fitOrtho, fitPerspective, orthoPixels, type Frame, type Insets, type ViewMode } from './framing'
+import { makeColliders, type DetailLevel, type WalkShared } from './walk'
+import { WalkRig } from './Walk'
 
 export interface SceneProps {
   garden: Garden
@@ -23,7 +26,16 @@ export interface SceneProps {
   sunHeatmap?: SunHeatmap
   showHeatmap: boolean
   halfSizeM: number
-  topView: boolean
+  /** Mode de vue : dessus (orthographique), perspective ou promenade (à hauteur d'yeux). */
+  mode: ViewMode
+  /** Emprise de la parcelle (cadrage) et clé de recadrage automatique. */
+  frame: Frame
+  /** Incrémenté par « Recentrer sur le jardin ». */
+  fitNonce: number
+  /** Mesure les bandeaux de l'interface (px) pour cadrer dans la zone réellement visible. */
+  getInsets: () => Insets
+  walkShared: WalkShared
+  reducedMotion: boolean
   sun: SunState
   /** Date (ms) utilisée pour la croissance des plantes. */
   growthTime: number
@@ -33,16 +45,20 @@ export interface SceneProps {
 }
 
 const DRAG_THRESHOLD_PX = 6
-const ORIGIN: [number, number, number] = [0, 0, 0]
 const TOP_MOUSE = { LEFT: THREE.MOUSE.PAN, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.PAN }
 const TOP_TOUCH = { ONE: THREE.TOUCH.PAN, TWO: THREE.TOUCH.DOLLY_PAN }
 
 // ---------- Soleil, ciel, ambiance ----------
 
-function SunAndSky({ sun, halfSizeM }: { sun: SunState; halfSizeM: number }) {
+const COARSE_POINTER = typeof window !== 'undefined' && !!window.matchMedia?.('(pointer: coarse)').matches
+
+function SunAndSky({ sun, halfSizeM, walking }: { sun: SunState; halfSizeM: number; walking: boolean }) {
   const scene = useThree((s) => s.scene)
+  const invalidate = useThree((s) => s.invalidate)
   const lightRef = useRef<THREE.DirectionalLight>(null)
   const dist = halfSizeM * 3
+  // Ombres limitées : 1024² sur écran tactile, 2048² ailleurs.
+  const shadowSize = COARSE_POINTER ? 1024 : 2048
 
   useLayoutEffect(() => {
     const l = lightRef.current
@@ -62,9 +78,16 @@ function SunAndSky({ sun, halfSizeM }: { sun: SunState; halfSizeM: number }) {
     const c = new THREE.Color(sun.sky)
     if (scene.background instanceof THREE.Color) scene.background.copy(c)
     else scene.background = c
-    if (scene.fog instanceof THREE.Fog) scene.fog.color.copy(c)
-    else scene.fog = new THREE.Fog(c, halfSizeM * 5, halfSizeM * 12)
-  }, [scene, sun.sky, halfSizeM])
+    // À hauteur d'yeux, la brume fond le sol dans le ciel : pas de ligne d'horizon abrupte.
+    const near = walking ? 45 : halfSizeM * 5
+    const far = walking ? Math.min(halfSizeM * 6, 260) : halfSizeM * 12
+    if (scene.fog instanceof THREE.Fog) {
+      scene.fog.color.copy(c)
+      scene.fog.near = near
+      scene.fog.far = far
+    } else scene.fog = new THREE.Fog(c, near, far)
+    invalidate()
+  }, [scene, sun.sky, halfSizeM, walking, invalidate])
   useEffect(
     () => () => {
       scene.fog = null
@@ -82,7 +105,7 @@ function SunAndSky({ sun, halfSizeM }: { sun: SunState; halfSizeM: number }) {
         position={[dx * dist, y * dist, dz * dist]}
         intensity={2.8 * sun.daylight}
         color={sun.light}
-        shadow-mapSize={[2048, 2048]}
+        shadow-mapSize={[shadowSize, shadowSize]}
         shadow-bias={-0.0004}
         shadow-normalBias={0.04}
       />
@@ -92,81 +115,148 @@ function SunAndSky({ sun, halfSizeM }: { sun: SunState; halfSizeM: number }) {
   )
 }
 
-// ---------- Caméra et contrôles ----------
+// ---------- Caméra et contrôles (dessus / perspective) ----------
 
-function CameraRig({ topView, halfSizeM, compassRef }: { topView: boolean; halfSizeM: number; compassRef: RefObject<HTMLDivElement> }) {
+function CameraRig({
+  mode,
+  frame,
+  nonce,
+  halfSizeM,
+  getInsets,
+  centerY,
+  reducedMotion,
+  compassRef,
+}: {
+  mode: 'dessus' | 'perspective'
+  frame: Frame
+  nonce: number
+  halfSizeM: number
+  getInsets: () => Insets
+  centerY: number
+  reducedMotion: boolean
+  compassRef: RefObject<HTMLDivElement>
+}) {
   const size = useThree((s) => s.size)
-  const controlsRef = useRef<OrbitControlsImpl>(null)
-  // Zoom initial de la vue de dessus : la scène tient dans le plus petit côté du canvas.
-  const orthoZoom = useMemo(() => Math.max(1, Math.min(size.width, size.height)) / (2 * halfSizeM * 1.08), [topView, halfSizeM])
+  const camera = useThree((s) => s.camera)
+  const controls = useThree((s) => s.controls) as unknown as OrbitControlsImpl | null
+  const invalidate = useThree((s) => s.invalidate)
+  const top = mode === 'dessus'
+  const touched = useRef(false)
+  const applied = useRef({ token: '', w: 0, h: 0 })
+  const token = `${mode}|${frame.key}|${nonce}`
+
+  // Cadrage calculé sur l'emprise de la parcelle et la zone visible du canvas.
+  const fit = useMemo(() => {
+    const insets = getInsets()
+    return top
+      ? { ortho: fitOrtho(frame.bounds, size.width, size.height, insets), persp: null }
+      : { ortho: null, persp: fitPerspective(frame.bounds, size.width, size.height, insets, { groundY: centerY }) }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [top, frame.key, nonce, size.width, size.height, centerY, getInsets])
+  // Valeurs de départ des caméras : figées tant que le cadrage ne change pas (un redimensionnement ne réinitialise pas le zoom de l'utilisateur).
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const init = useMemo(() => fit, [top, frame.key, nonce])
+
+  // (Re)cadrage : à l'ouverture, au changement de mode ou de parcelle, et sur « Recentrer ».
+  // Tant que l'utilisateur n'a pas touché à la vue, un redimensionnement du canvas recadre aussi.
+  useEffect(() => {
+    if (!controls || controls.object !== camera) return
+    if (!!(camera as THREE.OrthographicCamera).isOrthographicCamera !== top) return
+    const a = applied.current
+    const same = a.token === token
+    if (same && (touched.current || (a.w === size.width && a.h === size.height))) return
+    if (fit.ortho && (camera as THREE.OrthographicCamera).isOrthographicCamera) {
+      const [tx, , tz] = fit.ortho.target
+      const cam = camera as THREE.OrthographicCamera
+      cam.zoom = fit.ortho.zoom
+      cam.position.set(tx, halfSizeM * 4, tz + 0.001)
+      cam.updateProjectionMatrix()
+      controls.target.set(tx, 0, tz)
+    } else if (fit.persp && (camera as THREE.PerspectiveCamera).isPerspectiveCamera) {
+      camera.position.set(...fit.persp.position)
+      controls.target.set(...fit.persp.target)
+    } else return
+    controls.update()
+    applied.current = { token, w: size.width, h: size.height }
+    if (!same) touched.current = false
+    invalidate()
+  }, [controls, camera, top, token, fit, size.width, size.height, halfSizeM, invalidate])
+
+  useEffect(() => {
+    if (!controls) return
+    const onStart = () => {
+      touched.current = true
+    }
+    controls.addEventListener('start', onStart)
+    return () => controls.removeEventListener('start', onStart)
+  }, [controls])
 
   useFrame(() => {
-    const c = controlsRef.current
+    const c = controls
     const el = compassRef.current
-    if (c && el) el.style.transform = `rotate(${c.getAzimuthalAngle()}rad)`
+    if (c && el && c.object === camera) el.style.transform = `rotate(${c.getAzimuthalAngle()}rad)`
   })
 
   const clampTarget = useCallback(() => {
-    const c = controlsRef.current
+    const c = controls
     if (!c) return
     const t = c.target
     const cx = Math.max(-halfSizeM, Math.min(halfSizeM, t.x))
     const cz = Math.max(-halfSizeM, Math.min(halfSizeM, t.z))
     const dx = cx - t.x
     const dz = cz - t.z
-    if (dx || dz || t.y !== 0) {
-      const dy = -t.y
-      t.set(cx, 0, cz)
+    // En perspective la cible reste à la hauteur du relief : seul le plan horizontal est borné.
+    if (dx || dz || (top && t.y !== 0)) {
+      const dy = top ? -t.y : 0
+      t.set(cx, top ? 0 : t.y, cz)
       c.object.position.x += dx
       c.object.position.y += dy
       c.object.position.z += dz
     }
-  }, [halfSizeM])
+  }, [controls, halfSizeM, top])
 
-  return topView ? (
-    <>
-      {/* Légèrement décalée vers le sud (+Z) : l'azimut vaut 0, le nord est en haut de l'écran. */}
-      <OrthographicCamera key="ortho" makeDefault position={[0, halfSizeM * 4, 0.001]} zoom={orthoZoom} near={0.1} far={halfSizeM * 20} />
-      <OrbitControls
-        key="ctl-top"
-        ref={controlsRef}
-        makeDefault
-        target={ORIGIN}
-        enableRotate={false}
-        enableDamping
-        dampingFactor={0.15}
-        screenSpacePanning
-        minZoom={orthoZoom * 0.6}
-        maxZoom={orthoZoom * 40}
-        mouseButtons={TOP_MOUSE}
-        touches={TOP_TOUCH}
-        onChange={clampTarget}
-      />
-    </>
-  ) : (
-    <>
-      <PerspectiveCamera
-        key="persp"
-        makeDefault
-        position={[0, halfSizeM * 0.85, halfSizeM * 1.15]}
-        fov={45}
-        near={0.1}
-        far={halfSizeM * 20}
-      />
-      <OrbitControls
-        key="ctl-persp"
-        ref={controlsRef}
-        makeDefault
-        target={ORIGIN}
-        enableDamping
-        dampingFactor={0.12}
-        minDistance={2}
-        maxDistance={halfSizeM * 3.5}
-        maxPolarAngle={Math.PI / 2 - 0.08}
-        onChange={clampTarget}
-      />
-    </>
-  )
+  if (top && init.ortho && fit.ortho) {
+    const [tx, , tz] = init.ortho.target
+    return (
+      <>
+        {/* Légèrement décalée vers le sud (+Z) : l'azimut vaut 0, le nord est en haut de l'écran. */}
+        <OrthographicCamera key="ortho" makeDefault position={[tx, halfSizeM * 4, tz + 0.001]} zoom={init.ortho.zoom} near={0.1} far={halfSizeM * 20} />
+        <OrbitControls
+          key="ctl-top"
+          makeDefault
+          target={init.ortho.target}
+          enableRotate={false}
+          enableDamping={!reducedMotion}
+          dampingFactor={0.15}
+          screenSpacePanning
+          minZoom={fit.ortho.zoom * 0.5}
+          maxZoom={fit.ortho.zoom * 40}
+          mouseButtons={TOP_MOUSE}
+          touches={TOP_TOUCH}
+          onChange={clampTarget}
+        />
+      </>
+    )
+  }
+  if (!top && init.persp && fit.persp) {
+    return (
+      <>
+        <PerspectiveCamera key="persp" makeDefault position={init.persp.position} fov={45} near={0.1} far={halfSizeM * 20} />
+        <OrbitControls
+          key="ctl-persp"
+          makeDefault
+          target={init.persp.target}
+          enableDamping={!reducedMotion}
+          dampingFactor={0.12}
+          minDistance={fit.persp.minDistance}
+          maxDistance={fit.persp.maxDistance}
+          maxPolarAngle={Math.PI / 2 - 0.08}
+          onChange={clampTarget}
+        />
+      </>
+    )
+  }
+  return null
 }
 
 // ---------- Scène ----------
@@ -181,12 +271,18 @@ export function Scene(props: SceneProps) {
     sunHeatmap,
     showHeatmap,
     halfSizeM,
-    topView,
+    mode,
+    frame,
+    fitNonce,
+    getInsets,
+    walkShared,
+    reducedMotion,
     sun,
     growthTime,
     month,
     compassRef,
   } = props
+  const walking = mode === 'promenade'
   const get = useThree((s) => s.get)
   const invalidate = useThree((s) => s.invalidate)
   const gl = useThree((s) => s.gl)
@@ -200,6 +296,12 @@ export function Scene(props: SceneProps) {
 
   const [hoverId, setHoverId] = useState<string | undefined>()
   const [drag, setDrag] = useState<{ id: string; position: XY } | null>(null)
+  // Niveaux de détail des plantes proches du promeneur (calculés par WalkRig).
+  const [lod, setLod] = useState<Record<string, DetailLevel>>({})
+  useEffect(() => {
+    if (!walking) setLod({})
+  }, [walking])
+  const colliders = useMemo(() => makeColliders(garden.buildings), [garden.buildings])
 
   const { parts, visuals } = useMemo(
     () =>
@@ -210,9 +312,11 @@ export function Scene(props: SceneProps) {
         month,
         sample,
         override: drag ?? undefined,
+        lod: walking ? lod : undefined,
       }),
-    [plants, speciesById, growthTime, month, sample, drag],
+    [plants, speciesById, growthTime, month, sample, drag, lod, walking],
   )
+  const centerY = useMemo(() => sample((frame.bounds.minX + frame.bounds.maxX) / 2, (frame.bounds.minY + frame.bounds.maxY) / 2), [sample, frame.bounds])
 
   // ----- Sol sous le pointeur (raycast sur le maillage du sol, repli sur le plan y = 0) -----
   const picker = useMemo(
@@ -302,20 +406,26 @@ export function Scene(props: SceneProps) {
     () => ({
       onDown: (id, e) => {
         if (cb.current.placingSpeciesId) return // en mode plantation, le clic va au sol
+        if (cb.current.mode === 'promenade') return // promenade : pas de glisser-déposer, le glisser sert à regarder
         if (e.nativeEvent.isPrimary === false) return
         e.stopPropagation()
         cb.current.onSelectPlant(id)
         startDrag(id, e.nativeEvent)
       },
-      onClick: (_id, e) => {
-        if (!cb.current.placingSpeciesId) e.stopPropagation() // n'atteint pas le sol (désélection)
+      onClick: (id, e) => {
+        if (cb.current.placingSpeciesId) return
+        e.stopPropagation() // n'atteint pas le sol (désélection)
+        // Promenade : un toucher / clic (sans glisser) sélectionne la plante.
+        if (cb.current.mode === 'promenade' && e.delta <= DRAG_THRESHOLD_PX) cb.current.onSelectPlant(id)
       },
       onOver: (id, e) => {
+        if (cb.current.mode === 'promenade') return
         e.stopPropagation()
         setHoverId(id)
         if (!cb.current.placingSpeciesId && !dragCleanup.current) gl.domElement.style.cursor = 'grab'
       },
       onOut: (id) => {
+        if (cb.current.mode === 'promenade') return
         setHoverId((h) => (h === id ? undefined : h))
         if (!dragCleanup.current) gl.domElement.style.cursor = cb.current.placingSpeciesId ? 'crosshair' : ''
       },
@@ -355,14 +465,41 @@ export function Scene(props: SceneProps) {
 
   return (
     <>
-      <SunAndSky sun={sun} halfSizeM={halfSizeM} />
-      <CameraRig topView={topView} halfSizeM={halfSizeM} compassRef={compassRef} />
+      <SunAndSky sun={sun} halfSizeM={halfSizeM} walking={walking} />
+      {walking ? (
+        <WalkRig
+          shared={walkShared}
+          parcel={garden.parcel}
+          bounds={frame.bounds}
+          colliders={colliders}
+          sample={sample}
+          visuals={visuals}
+          selectedPlantId={selectedPlantId}
+          resetToken={`${frame.key}|${fitNonce}`}
+          halfSizeM={halfSizeM}
+          compassRef={compassRef}
+          onLod={setLod}
+        />
+      ) : (
+        <CameraRig
+          mode={mode as 'dessus' | 'perspective'}
+          frame={frame}
+          nonce={fitNonce}
+          halfSizeM={halfSizeM}
+          getInsets={getInsets}
+          centerY={centerY}
+          reducedMotion={reducedMotion}
+          compassRef={compassRef}
+        />
+      )}
 
       <Ground
         ref={groundRef}
         center={garden.center}
         terrain={garden.terrain}
         halfSizeM={halfSizeM}
+        px={orthoPixels(halfSizeM)}
+        walking={walking}
         sample={sample}
         onPointerMove={moveGhost}
         onClick={onGroundClick}
@@ -389,7 +526,7 @@ export function Scene(props: SceneProps) {
           v && (
             <Html
               key={v.id}
-              position={[v.base[0], v.base[1] + v.heightM + 0.35, v.base[2]]}
+              position={[v.base[0], v.base[1] + (walking ? Math.min(v.heightM + 0.35, 2.5) : v.heightM + 0.35), v.base[2]]}
               center
               zIndexRange={[5, 0]}
               style={{ pointerEvents: 'none' }}

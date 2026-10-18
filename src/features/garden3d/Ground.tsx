@@ -7,19 +7,20 @@ import { Line } from '@react-three/drei'
 import type { Building, LonLat, TerrainGrid, XY } from '../../types'
 import { orthoTextureUrl } from '../../lib/ign'
 import { buildTerrainGeometry, densifyRing, terrainSegments, type HeightSampler } from './terrain'
+import { createGroundDetail } from './groundDetail'
 
 /** Charge l'orthophoto ; renvoie null tant qu'elle n'est pas prête ou si elle échoue (repli vert). */
-function useOrthoTexture(center: LonLat, halfSizeM: number): THREE.Texture | null {
+function useOrthoTexture(center: LonLat, halfSizeM: number, px: number): THREE.Texture | null {
   const gl = useThree((s) => s.gl)
   const [tex, setTex] = useState<THREE.Texture | null>(null)
   const { lon, lat } = center
   const url = useMemo(() => {
     try {
-      return orthoTextureUrl({ lon, lat }, halfSizeM, 1024)
+      return orthoTextureUrl({ lon, lat }, halfSizeM, px)
     } catch {
       return null // fonction pas encore disponible / hors ligne
     }
-  }, [lon, lat, halfSizeM])
+  }, [lon, lat, halfSizeM, px])
 
   useEffect(() => {
     setTex(null)
@@ -62,16 +63,26 @@ interface GroundProps {
   center: LonLat
   terrain?: TerrainGrid
   halfSizeM: number
+  /** Résolution demandée pour l'orthophoto (1024–2048). */
+  px?: number
+  /** Mode Promenade : active le détail d'herbe procédural sous l'orthophoto. */
+  walking?: boolean
   sample: HeightSampler
   onPointerMove?: (e: ThreeEvent<PointerEvent>) => void
   onClick?: (e: ThreeEvent<MouseEvent>) => void
 }
 
 export const Ground = forwardRef<THREE.Mesh, GroundProps>(function Ground(
-  { center, terrain, halfSizeM, sample, onPointerMove, onClick },
+  { center, terrain, halfSizeM, px = 1024, walking = false, sample, onPointerMove, onClick },
   ref,
 ) {
-  const tex = useOrthoTexture(center, halfSizeM)
+  const invalidate = useThree((s) => s.invalidate)
+  const tex = useOrthoTexture(center, halfSizeM, px)
+  const detail = useMemo(() => createGroundDetail(), [])
+  useEffect(() => {
+    detail.uniforms.uWalk.value = walking ? 1 : 0
+    invalidate()
+  }, [detail, walking, invalidate])
   const geometry = useMemo(
     () => buildTerrainGeometry(halfSizeM, terrainSegments(terrain, halfSizeM), sample),
     [halfSizeM, terrain, sample],
@@ -86,6 +97,8 @@ export const Ground = forwardRef<THREE.Mesh, GroundProps>(function Ground(
           color={tex ? '#ffffff' : '#7aa457'}
           roughness={1}
           metalness={0}
+          onBeforeCompile={detail.onBeforeCompile as unknown as THREE.Material['onBeforeCompile']}
+          customProgramCacheKey={detail.cacheKey}
         />
       </mesh>
       {/* Pourtour neutre au-delà de la zone cartographiée, pour éviter un vide à l'horizon. */}

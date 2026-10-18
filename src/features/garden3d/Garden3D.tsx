@@ -1,11 +1,14 @@
 // Vue 3D du jardin : relief + orthophoto, bâtiments, plantes, soleil réel et ombres.
 // Repère : x = est, y = nord (m) ; Three.js : X = est, Y = haut, Z = -nord.
-import { Component, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { Component, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Canvas } from '@react-three/fiber'
 import type { Garden, Plant, Species, XY } from '../../types'
 import { Scene } from './Scene'
 import { dateFromDoy, dayOfYear, sunState } from './sun'
 import { heatmapRange, rampColor } from './Ground'
+import { NO_INSETS, gardenFrame, type Insets, type Rect, type ViewMode } from './framing'
+import { createWalkShared } from './walk'
+import { Joystick, MiniMap } from './WalkUI'
 import './garden3d.css'
 
 export interface Garden3DProps {
@@ -20,8 +23,10 @@ export interface Garden3DProps {
   onPlace?: (position: XY) => void
   /** Carte d'ensoleillement optionnelle (heures de soleil), calculée par l'appelant. Ordre : sud→nord puis ouest→est. */
   sunHeatmap?: { halfSizeM: number; n: number; values: number[] }
-  /** Demi-côté de la scène (m), défaut 40. */
+  /** Demi-côté du carré de sol / orthophoto (m). Par défaut : emprise de la parcelle + 25 m de voisinage (30 à 100 m). */
   halfSizeM?: number
+  /** Mode de vue au démarrage (perspective par défaut). */
+  defaultView?: ViewMode
 }
 
 const HOUR_MIN = 5
@@ -47,6 +52,25 @@ class CanvasErrorBoundary extends Component<{ children: ReactNode }, { error: bo
     return this.props.children
   }
 }
+
+/** Vrai si l'utilisateur demande moins d'animations (pas d'inertie de caméra). */
+function usePrefersReducedMotion(): boolean {
+  const [reduced, setReduced] = useState(() => typeof window !== 'undefined' && !!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches)
+  useEffect(() => {
+    const mq = window.matchMedia?.('(prefers-reduced-motion: reduce)')
+    if (!mq) return
+    const on = () => setReduced(mq.matches)
+    mq.addEventListener?.('change', on)
+    return () => mq.removeEventListener?.('change', on)
+  }, [])
+  return reduced
+}
+
+const MODES: { id: ViewMode; label: string; title: string }[] = [
+  { id: 'dessus', label: 'Dessus', title: 'Vue de dessus' },
+  { id: 'perspective', label: 'Perspective', title: 'Vue en perspective' },
+  { id: 'promenade', label: 'Promenade', title: 'Se promener dans le jardin, à hauteur d’yeux' },
+]
 
 function formatHour(h: number): string {
   const hh = Math.floor(h)
@@ -76,18 +100,73 @@ export function Garden3D({
   placingSpeciesId,
   onPlace,
   sunHeatmap,
-  halfSizeM = 40,
+  halfSizeM: halfSizeProp,
+  defaultView = 'perspective',
 }: Garden3DProps) {
   const today = useMemo(() => new Date(), [])
   const year = today.getFullYear()
   const [doy, setDoy] = useState(() => dayOfYear(today))
   const [hour, setHour] = useState(() => initialHour(garden.center))
   const [yearsAhead, setYearsAhead] = useState(0)
-  const [topView, setTopView] = useState(false)
+  const [mode, setMode] = useState<ViewMode>(defaultView)
+  const [fitNonce, setFitNonce] = useState(0)
+  const [walkHint, setWalkHint] = useState(false)
+  const rootRef = useRef<HTMLDivElement>(null)
+  const walkShared = useMemo(() => createWalkShared(), [])
+  const reducedMotion = usePrefersReducedMotion()
+  const coarse = useMemo(() => typeof window !== 'undefined' && (!!window.matchMedia?.('(pointer: coarse)').matches || navigator.maxTouchPoints > 0), [])
+  const [running, setRunning] = useState(false)
+  const walking = mode === 'promenade'
+
+  // Emprise du jardin (parcelle, sinon plantes, sinon ±15 m) : cadrage et taille du sol.
+  const hasParcel = !!garden.parcel && garden.parcel.length > 2
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const frame = useMemo(() => gardenFrame(garden.parcel, plants), [garden.parcel, hasParcel ? null : plants])
+  const halfSizeM = halfSizeProp ?? frame.halfSizeM
+  // Nouvelle parcelle : la promenade repart de l'entrée.
+  useEffect(() => {
+    walkShared.saved = false
+  }, [frame.key, walkShared])
+
+  /** Hauteur des bandeaux de l'interface, pour cadrer dans la zone réellement visible. */
+  const getInsets = useCallback((): Insets => {
+    const root = rootRef.current
+    if (!root) return NO_INSETS
+    const rr = root.getBoundingClientRect()
+    const bottom = root.querySelector('.g3d-bottom')
+    const info = root.querySelector('.g3d-info')
+    const compass = root.querySelector('.g3d-compass')
+    const rect = (el: Element | null): Rect[] => {
+      if (!el) return []
+      const r = el.getBoundingClientRect()
+      return [{ x0: r.left - rr.left - 6, y0: r.top - rr.top - 6, x1: r.right - rr.left + 6, y1: r.bottom - rr.top + 6 }]
+    }
+    return {
+      top: info ? Math.max(0, info.getBoundingClientRect().bottom - rr.top) + 6 : 0,
+      bottom: bottom ? Math.max(0, rr.bottom - bottom.getBoundingClientRect().top) + 6 : 0,
+      left: 0,
+      right: 0,
+      corners: [...rect(info), ...rect(compass)],
+    }
+  }, [])
+
+  // Aide de la Promenade : visible quelques secondes à l'entrée.
+  useEffect(() => {
+    if (!walking) {
+      setWalkHint(false)
+      walkShared.run = false
+      setRunning(false)
+      return
+    }
+    setWalkHint(true)
+    const t = window.setTimeout(() => setWalkHint(false), 9000)
+    return () => window.clearTimeout(t)
+  }, [walking, walkShared])
   const [showHeatmap, setShowHeatmap] = useState(false)
   const [playing, setPlaying] = useState(false)
-  // Sur petit écran, le panneau démarre replié (seul le curseur d'heure reste visible).
-  const [collapsed, setCollapsed] = useState(() => typeof window !== 'undefined' && window.innerWidth < 480)
+  // Sur petit écran (ou écran peu haut), le panneau démarre replié : seul le curseur d'heure reste visible
+  // et le jardin dispose de plus de place.
+  const [collapsed, setCollapsed] = useState(() => typeof window !== 'undefined' && (window.innerWidth < 480 || window.innerHeight < 900))
   const compassRef = useRef<HTMLDivElement>(null)
   const hourRef = useRef(hour)
   const hourStart = useRef(hour)
@@ -154,7 +233,7 @@ export function Garden3D({
   const placingName = placingSpeciesId ? speciesById[placingSpeciesId]?.nomCommun ?? 'la plante' : undefined
 
   return (
-    <div className="g3d-root">
+    <div className="g3d-root" ref={rootRef} data-mode={mode}>
       <CanvasErrorBoundary>
         <Canvas
           className="g3d-canvas"
@@ -178,7 +257,12 @@ export function Garden3D({
             sunHeatmap={sunHeatmap}
             showHeatmap={showHeatmap}
             halfSizeM={halfSizeM}
-            topView={topView}
+            mode={mode}
+            frame={frame}
+            fitNonce={fitNonce}
+            getInsets={getInsets}
+            walkShared={walkShared}
+            reducedMotion={reducedMotion}
             sun={sun}
             growthTime={growthTime}
             month={month}
@@ -189,14 +273,16 @@ export function Garden3D({
 
       <div className="g3d-overlay">
         <div className="g3d-top">
-          <div className="g3d-chip g3d-info" aria-live="polite">
-            <strong>{dateLabel}</strong> · {formatHour(hour)}
-            <span className="g3d-sun">
-              {sun.altitudeDeg > 0
-                ? `Soleil ${Math.round(sun.altitudeDeg)}° · ${cardinal(sun.azimuthDeg)}`
-                : 'Soleil couché'}
-            </span>
-            {yearsAhead > 0 && <span className="g3d-sun">Plantes dans {yearsAhead} an{yearsAhead > 1 ? 's' : ''}</span>}
+          <div className="g3d-left">
+            <div className="g3d-chip g3d-info" aria-live="polite">
+              <strong>{dateLabel}</strong> · {formatHour(hour)}
+              <span className="g3d-sun">
+                {sun.altitudeDeg > 0
+                  ? `Soleil ${Math.round(sun.altitudeDeg)}° · ${cardinal(sun.azimuthDeg)}`
+                  : 'Soleil couché'}
+              </span>
+              {yearsAhead > 0 && <span className="g3d-sun">Plantes dans {yearsAhead} an{yearsAhead > 1 ? 's' : ''}</span>}
+            </div>
           </div>
           <div className="g3d-tools">
             <div className="g3d-compass" title="Nord" aria-label="Flèche du nord">
@@ -210,15 +296,17 @@ export function Garden3D({
                 </svg>
               </div>
             </div>
-            <button
-              type="button"
-              className="g3d-btn"
-              aria-pressed={topView}
-              onClick={() => setTopView((v) => !v)}
-              title={topView ? 'Passer en perspective' : 'Passer en vue de dessus'}
-            >
-              {topView ? 'Perspective' : 'Vue de dessus'}
-            </button>
+            {walking && (
+              <MiniMap
+                shared={walkShared}
+                parcel={garden.parcel}
+                buildings={garden.buildings}
+                plants={plants}
+                speciesById={speciesById}
+                selectedPlantId={selectedPlantId}
+                bounds={frame.bounds}
+              />
+            )}
             {sunHeatmap && (
               <button
                 type="button"
@@ -234,7 +322,6 @@ export function Garden3D({
         </div>
 
         {placingName && <div className="g3d-chip g3d-hint">Touchez le sol pour planter : {placingName}</div>}
-
         <div className="g3d-bottom">
           {showHeatmap && heatRange && (
             <div className="g3d-chip g3d-legend">
@@ -246,6 +333,61 @@ export function Garden3D({
               </span>
             </div>
           )}
+
+          {walking && coarse && (
+            <div className="g3d-walkpad">
+              <Joystick shared={walkShared} />
+              <button
+                type="button"
+                className="g3d-btn g3d-run"
+                aria-pressed={running}
+                aria-label="Courir"
+                onClick={() => {
+                  walkShared.run = !running
+                  setRunning(!running)
+                }}
+              >
+                Courir
+              </button>
+            </div>
+          )}
+
+          {walking && walkHint && (
+            <div className="g3d-chip g3d-hint g3d-hint--walk" role="status">
+              {coarse
+                ? 'Joystick pour marcher, glissez pour regarder. Touchez une plante pour la choisir.'
+                : 'ZQSD ou flèches pour marcher, glissez la souris pour regarder, Maj pour courir.'}
+            </div>
+          )}
+
+          <div className="g3d-bar">
+            <div className="g3d-seg" role="group" aria-label="Mode de vue">
+              {MODES.map((m) => (
+                <button
+                  key={m.id}
+                  type="button"
+                  className="g3d-seg-btn"
+                  aria-pressed={mode === m.id}
+                  title={m.title}
+                  onClick={() => setMode(m.id)}
+                >
+                  {m.label}
+                </button>
+              ))}
+            </div>
+            <button
+              type="button"
+              className="g3d-btn g3d-btn--icon g3d-recenter"
+              aria-label="Recentrer sur le jardin"
+              title={walking ? 'Revenir à l’entrée du jardin' : 'Recentrer sur le jardin'}
+              onClick={() => setFitNonce((n) => n + 1)}
+            >
+              <svg viewBox="0 0 20 20" width="20" height="20" aria-hidden="true">
+                <circle cx="10" cy="10" r="4.5" fill="none" stroke="currentColor" strokeWidth="1.8" />
+                <path d="M10 1.5v3.5M10 15v3.5M1.5 10H5M15 10h3.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+              </svg>
+            </button>
+          </div>
 
           <div className="g3d-panel">
             <div className="g3d-row">

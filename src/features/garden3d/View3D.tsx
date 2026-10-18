@@ -6,8 +6,8 @@ import { obstaclesFor, sunHoursGrid } from '../../engine/sun'
 import type { Garden } from '../../types'
 import { GardenSide, PlacingBanner } from '../map/GardenSide'
 import { placePlant } from '../map/placing'
-import { SCENE_HALF_SIZE } from '../settings/createGarden'
 import { Garden3D } from './Garden3D'
+import { gardenFrame } from './framing'
 
 type SunMode = 'aucune' | 'juin' | 'mars' | 'decembre' | 'aujourdhui'
 const SUN_DATES: Record<Exclude<SunMode, 'aucune'>, () => Date> = {
@@ -23,6 +23,11 @@ export default function View3D({ garden }: { garden: Garden }) {
   const [sunMode, setSunMode] = useState<SunMode>('aucune')
   const [heatmap, setHeatmap] = useState<{ halfSizeM: number; n: number; values: number[] }>()
   const [computing, setComputing] = useState(false)
+  // Sol, orthophoto et carte d'ensoleillement couvrent la même emprise : parcelle + ~25 m de voisinage.
+  const hasParcel = !!garden.parcel && garden.parcel.length > 2
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const frame = useMemo(() => gardenFrame(garden.parcel, plants), [garden.parcel, hasParcel ? null : plants])
+  const halfSizeM = frame.halfSizeM
   const plantsKey = useMemo(() => plants.map((p) => `${p.id}:${p.position.x.toFixed(1)}:${p.position.y.toFixed(1)}`).join('|'), [plants])
 
   useEffect(() => {
@@ -35,11 +40,11 @@ export default function View3D({ garden }: { garden: Garden }) {
     const t = setTimeout(() => {
       const date = SUN_DATES[sunMode]()
       const obstacles = obstaclesFor(garden, plants, SPECIES_BY_ID, date)
-      setHeatmap(sunHoursGrid(garden, obstacles, date, { halfSizeM: SCENE_HALF_SIZE, n: 40, stepMin: 30 }))
+      setHeatmap(sunHoursGrid(garden, obstacles, date, { halfSizeM, n: 40, stepMin: 30 }))
       setComputing(false)
     }, 50)
     return () => clearTimeout(t)
-  }, [sunMode, garden, plantsKey]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [sunMode, garden, plantsKey, halfSizeM]) // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div className="workspace">
@@ -54,7 +59,7 @@ export default function View3D({ garden }: { garden: Garden }) {
           placingSpeciesId={placingSpeciesId}
           onPlace={(pos) => placingSpeciesId && placePlant(garden, placingSpeciesId, pos)}
           sunHeatmap={heatmap}
-          halfSizeM={SCENE_HALF_SIZE}
+          halfSizeM={halfSizeM}
         />
         <PlacingBanner />
       </div>
@@ -76,7 +81,7 @@ export default function View3D({ garden }: { garden: Garden }) {
             </span>
           )}
         </div>
-        <GardenSide garden={garden} hint="Faites tourner la vue à deux doigts ou à la souris. Glissez une plante pour la déplacer. Le curseur « dans N ans » montre vos arbres adultes et leur ombre future." />
+        <GardenSide garden={garden} hint="Faites tourner la vue à deux doigts ou à la souris. Glissez une plante pour la déplacer. Le mode « Promenade » vous place à hauteur d'yeux dans le jardin. Le curseur « dans N ans » montre vos arbres adultes et leur ombre future." />
       </aside>
     </div>
   )

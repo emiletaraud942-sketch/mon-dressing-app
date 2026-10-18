@@ -1,5 +1,5 @@
 // Rendu instancié des plantes : une InstancedMesh par type de pièce et par opacité,
-// soit au plus 10 appels de dessin quel que soit le nombre de plantes.
+// soit au plus 14 appels de dessin (7 types de pièces) quel que soit le nombre de plantes.
 import { useEffect, useLayoutEffect, useMemo } from 'react'
 import * as THREE from 'three'
 import { useThree, type ThreeEvent } from '@react-three/fiber'
@@ -22,7 +22,7 @@ function getMaterial(kind: PartKind, transparent: boolean): THREE.MeshStandardMa
       color: '#ffffff',
       roughness: kind === 'dot' ? 0.45 : 0.88,
       metalness: 0,
-      flatShading: kind === 'blob' || kind === 'cone',
+      flatShading: kind === 'blob' || kind === 'cone' || kind === 'clump' || kind === 'trunk',
       transparent,
       opacity: transparent ? 0.42 : 1,
       depthWrite: !transparent,
@@ -80,12 +80,12 @@ function Layer({
   }, [mesh, parts, invalidate])
 
   const owner = (e: { instanceId?: number }) => (e.instanceId != null ? parts[e.instanceId]?.owner : undefined)
-  const casts = !transparent && kind !== 'dot'
+  const casts = !transparent && kind !== 'dot' && kind !== 'tuft'
   return (
     <primitive
       object={mesh}
       castShadow={casts}
-      receiveShadow={!transparent && kind !== 'dot'}
+      receiveShadow={!transparent && kind !== 'dot' && kind !== 'tuft'}
       renderOrder={transparent ? 2 : 0}
       onPointerDown={(e: ThreeEvent<PointerEvent>) => {
         const id = owner(e)

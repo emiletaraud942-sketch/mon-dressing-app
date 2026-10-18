@@ -54,6 +54,8 @@
 .g3d-chip,
 .g3d-panel,
 .g3d-btn,
+.g3d-seg,
+.g3d-joy,
 .g3d-compass {
   pointer-events: auto;
 }
@@ -94,6 +96,12 @@
   font-weight: 600;
   color: var(--g3d-accent);
   text-align: center;
+}
+
+.g3d-hint--walk {
+  max-width: 94%;
+  font-size: 13px;
+  line-height: 1.35;
 }
 
 .g3d-tools {
@@ -155,6 +163,111 @@
   padding: 0 8px;
   font-size: 12.5px;
   box-shadow: none;
+}
+
+/* ----- Colonne de gauche : infos + mini-carte ----- */
+.g3d-left {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  min-width: 0;
+}
+
+/* ----- Barre de contrôle : mode de vue + recentrer ----- */
+.g3d-bar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+.g3d-seg {
+  display: inline-flex;
+  border: 1px solid var(--g3d-border);
+  border-radius: var(--g3d-radius);
+  background: color-mix(in srgb, var(--g3d-surface) 92%, transparent);
+  box-shadow: 0 2px 10px rgb(0 0 0 / 10%);
+  overflow: hidden;
+}
+.g3d-seg-btn {
+  min-height: 40px;
+  min-width: 40px;
+  padding: 0 12px;
+  border: 0;
+  border-right: 1px solid var(--g3d-border);
+  background: transparent;
+  color: var(--g3d-text);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.g3d-seg-btn:last-child {
+  border-right: 0;
+}
+.g3d-seg-btn[aria-pressed='true'] {
+  background: var(--g3d-accent);
+  color: var(--g3d-surface);
+}
+.g3d-seg-btn:focus-visible {
+  outline: 2px solid var(--g3d-accent);
+  outline-offset: -4px;
+}
+.g3d-seg-btn[aria-pressed='true']:focus-visible {
+  outline-color: var(--g3d-surface);
+}
+
+/* ----- Promenade : joystick, bouton Courir, mini-carte ----- */
+.g3d-walkpad {
+  position: relative;
+  height: 0;
+}
+.g3d-joy {
+  position: absolute;
+  left: 6px;
+  bottom: 10px;
+  width: 132px;
+  height: 132px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: color-mix(in srgb, var(--g3d-surface) 55%, transparent);
+  border: 2px solid var(--g3d-border);
+  box-shadow: 0 2px 12px rgb(0 0 0 / 16%);
+  touch-action: none;
+}
+.g3d-joy-knob {
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  background: var(--g3d-accent);
+  border: 3px solid var(--g3d-surface);
+  box-shadow: 0 2px 8px rgb(0 0 0 / 25%);
+  pointer-events: none;
+}
+.g3d-run {
+  position: absolute;
+  right: 6px;
+  bottom: 22px;
+  width: 64px;
+  height: 64px;
+  min-height: 56px;
+  border-radius: 50%;
+  padding: 0;
+  font-size: 13px;
+  touch-action: manipulation;
+}
+.g3d-minimap {
+  width: 110px;
+  height: 110px;
+  border-radius: 50%;
+  box-shadow: 0 2px 10px rgb(0 0 0 / 18%);
+  pointer-events: none;
+}
+.g3d-joy:focus-visible,
+.g3d-run:focus-visible {
+  outline: 2px solid var(--g3d-accent);
+  outline-offset: 2px;
 }
 
 /* ----- Bas : légende + panneau ----- */
@@ -274,5 +387,12 @@
   }
   .g3d-btn {
     padding: 0 10px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .g3d-root * {
+    transition: none !important;
+    animation: none !important;
   }
 }
