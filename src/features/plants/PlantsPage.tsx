@@ -5,7 +5,7 @@ import { Icon } from '../../components/Icon'
 import { SpeciesPicker, normalize } from '../../components/SpeciesPicker'
 import { PhotoThumb } from '../../components/PhotoThumb'
 import { useGardenPlants } from '../../lib/store'
-import { setUi, startPlacing, useUi } from '../../lib/ui'
+import { closePlantSheet, setUi, startPlacing, useUi } from '../../lib/ui'
 import type { Garden, PlantStatus } from '../../types'
 import { PlantPanel, plantName } from './PlantPanel'
 import { IdentifyDialog } from './IdentifyDialog'
@@ -44,7 +44,7 @@ export function PlantsPage({ garden }: { garden: Garden }) {
         </div>
       </div>
       <div className="row" style={{ margin: '8px 0 16px' }}>
-        <input className="input" style={{ flex: 2, minWidth: 180 }} placeholder="Rechercher une plante" value={q} onChange={(e) => setQ(e.target.value)} />
+        <input className="input" style={{ flex: 2, minWidth: 180 }} type="search" aria-label="Rechercher une plante" placeholder="Rechercher une plante" value={q} onChange={(e) => setQ(e.target.value)} />
         <select className="input" style={{ flex: 1, minWidth: 140 }} value={status} onChange={(e) => setStatus(e.target.value as PlantStatus | '')} aria-label="Filtrer par état">
           <option value="">Tous les états</option>
           {Object.entries(STATUS_LABEL).map(([k, v]) => (
@@ -74,11 +74,11 @@ export function PlantsPage({ garden }: { garden: Garden }) {
                         style={{ width: '100%', justifyContent: 'flex-start', gap: 10, background: p.id === selectedPlantId ? 'var(--accent-soft)' : undefined }}
                         onClick={() => setUi({ selectedPlantId: p.id })}
                       >
-                        {p.photos[0] ? <PhotoThumb id={p.photos[0]} /> : <span className="dot" style={{ width: 16, height: 16, background: s?.couleurAccent ?? s?.couleur ?? '#6a9a5a' }} />}
+                        {p.photos[0] ? <PhotoThumb id={p.photos[0]} /> : <span className="dot" style={{ width: 16, height: 16, background: s?.couleurAccent ?? s?.couleur ?? 'var(--accent-2)' }} />}
                         <span style={{ textAlign: 'left', flex: 1 }}>
                           <strong>{plantName(p)}</strong>
                           <span className="muted small" style={{ display: 'block' }}>
-                            {STATUS_LABEL[p.status]} · depuis le {formatDate(p.plantedAt)}
+                            {STATUS_LABEL[p.status]} · {p.status === 'projet' ? 'prévu le' : 'planté le'} {formatDate(p.plantedAt)}
                           </span>
                         </span>
                       </button>
@@ -91,7 +91,7 @@ export function PlantsPage({ garden }: { garden: Garden }) {
         </div>
         {selected && (
           <div className="card">
-            <PlantPanel garden={garden} plant={selected} onClose={() => setUi({ selectedPlantId: undefined })} />
+            <PlantPanel garden={garden} plant={selected} onClose={closePlantSheet} />
             <button className="btn small" style={{ marginTop: 8 }} onClick={() => setUi({ tab: 'carte' })}>
               <Icon name="map" size={16} /> Voir sur la carte
             </button>

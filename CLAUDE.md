@@ -9,8 +9,10 @@ PWA française pour cartographier son jardin en 3D (données IGN), placer ses pl
 ## Architecture
 - React 18 + TypeScript + Vite, PWA (vite-plugin-pwa), MapLibre (carte 2D), Three.js / React Three Fiber (3D), SunCalc.
 - **Local-first** : état dans IndexedDB (`src/lib/store.ts`), photos dans IndexedDB (`src/lib/photos.ts`). Supabase optionnel (`src/lib/sync.ts`, `supabase/migrations`).
-- **Proxy** : le navigateur n'appelle que `/ext/geopf`, `/ext/apicarto`, `/ext/meteo`, `/ext/meteo-archive` (vite.config.ts en dev, rewrites de vercel.json en prod).
+- **Appels réseau du navigateur** : `/ext/geopf`, `/ext/apicarto`, `/ext/meteo`, `/ext/meteo-archive` (proxys : vite.config.ts en dev, rewrites de vercel.json en prod), `/api/identify` (fonction serveur) et Supabase (`*.supabase.co`, seulement si `VITE_SUPABASE_*` est configuré). Tout autre domaine est bloqué par la CSP de `vercel.json` : toute nouvelle source externe passe par un proxy `/ext/*` ou demande une mise à jour de la CSP.
 - **Fonction serveur** : `api/identify.ts` relaie Pl@ntNet (clé `PLANTNET_API_KEY` côté Vercel).
+- **PWA** : service worker en mode `prompt` (vite.config.ts) : la nouvelle version attend et l'interface propose « Recharger » (`virtual:pwa-register/react`). Gros chunks `three`/`maplibre` hors précache, mis en cache à la première utilisation. Jamais de cache pour `/api/*`, `/ext/meteo*` ni le géocodage. Icônes PNG générées depuis `public/icon.svg`.
+- **Typage** : `npm run typecheck` vérifie `src/` (`tsconfig.json`) puis `api/` et `vite.config.ts` (`tsconfig.node.json`).
 - **Repère** : coordonnées locales en mètres, x = est, y = nord, origine = centre du jardin (`src/lib/geo.ts`). En Three.js, Z = -nord.
 - **Contrat de données** : `src/types/index.ts`. Ne change pas le format stocké sans migration.
 
@@ -24,12 +26,19 @@ PWA française pour cartographier son jardin en 3D (données IGN), placer ses pl
 | Écrans, PWA | `src/App.tsx`, `src/features/*`, `src/components`, `src/styles` | dev-frontend-pwa |
 | Supabase, /api | `supabase/`, `src/lib/sync.ts`, `api/` | dev-backend-supabase |
 | Tests navigateur | — | qa-testeur |
-| Déploiement | `vercel.json` | devops-vercel |
+| Déploiement, PWA, build | `vercel.json`, `vite.config.ts`, `index.html`, `public/`, `tsconfig*.json`, `docs/DEPLOIEMENT.md` | devops-vercel |
 
 Orchestration : agent `chef-de-projet`. Skills : `ajouter-espece`, `deployer`, `verifier-api`.
 
 ## Conventions
 - Interface et commentaires en français ; phrases courtes.
-- Couleurs uniquement via les variables CSS de `:root` (thème clair et sombre).
-- Moteurs (`src/engine`) purs et testés ; ils reçoivent `speciesById` en paramètre.
+- Couleurs de l'interface uniquement via les variables CSS de `:root` (thème clair et sombre). Exceptions assumées : la scène 3D (`src/features/garden3d/*`, couleurs de scène : sol, ciel, feuillages), les couches MapLibre (`MapView`, `SpotPicker` : le style de carte ne lit pas les variables CSS) et `couleur`/`couleurAccent` des fiches espèces (pastilles et feuillages).
+- Moteurs (`src/engine`) purs et testés ; ils reçoivent `speciesById` en paramètre. Tests présents pour `calendar`, `growth`, `planting`, `sun` et `tasks`.
 - Licences : IGN Licence Ouverte (commercial OK) ; Open-Meteo non commercial ; Pl@ntNet 500 identifications/jour partagées.
+
+## Fiabilité des données
+- Le format stocké porte un numéro de version (`STATE_VERSION` dans `src/lib/migrate.ts`). Toute évolution incompatible = `STATE_VERSION + 1` et une étape dans `migrateState`, avec un test.
+- `migrateState` valide et corrige (`sanitize`) toute donnée qui entre : lecture d'IndexedDB au démarrage, import JSON, récupération Supabase. Jardins sans centre, plantes sans position, dates invalides, identifiants en double : écartés ou corrigés, avec avertissements. Un fichier d'une version plus récente est refusé.
+- Quand une correction est faite au chargement, l'original est gardé (clé de sauvegarde IndexedDB) avant réécriture. L'écriture est vidée sur `pagehide`/`visibilitychange` et un échec de lecture ne remplace jamais les données par un état vide.
+- L'export (`serializeState`) écrit toujours la version courante. Le stockage est demandé « persistant » (`navigator.storage.persist()`) ; l'interface signale l'échec.
+- Déploiement et exploitation : voir `docs/DEPLOIEMENT.md`.

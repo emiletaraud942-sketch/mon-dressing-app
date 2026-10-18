@@ -1,8 +1,8 @@
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import { SPECIES, SPECIES_BY_ID } from '../../data/species'
 import { CATEGORY_LABEL, SUN_LABEL } from '../../data/labels'
 import { useGardenPlants } from '../../lib/store'
-import { openSpecies, setUi } from '../../lib/ui'
+import { openSpecies, setUi, useUi } from '../../lib/ui'
 import { aspectLabel, slopeAt } from '../../lib/terrain'
 import { doyToLabel } from '../../lib/weather'
 import { obstaclesFor, seasonalSunHours } from '../../engine/sun'
@@ -11,6 +11,7 @@ import { MONTH_NAMES, whatToSowNow } from '../../engine/calendar'
 import type { Category, Garden, Month, Species, XY } from '../../types'
 import { placePlant } from '../map/placing'
 import { SpotPicker } from './SpotPicker'
+import { scoreLabel } from './scoreLabel'
 
 function SpeciesChips({ list }: { list: Species[] }) {
   if (list.length === 0) return <p className="muted small">Rien ce mois-ci.</p>
@@ -26,7 +27,9 @@ function SpeciesChips({ list }: { list: Species[] }) {
 }
 
 function SowNow({ garden }: { garden: Garden }) {
-  const [month, setMonth] = useState((new Date().getMonth() + 1) as Month)
+  const { sowMonth } = useUi()
+  const month = (sowMonth ?? new Date().getMonth() + 1) as Month
+  const setMonth = (m: Month) => setUi({ sowMonth: m })
   const now = useMemo(() => whatToSowNow(SPECIES, garden, month), [garden, month])
   return (
     <div className="card">
@@ -62,8 +65,13 @@ function SowNow({ garden }: { garden: Garden }) {
 
 function BestForSpot({ garden }: { garden: Garden }) {
   const plants = useGardenPlants(garden.id)
-  const [spot, setSpot] = useState<XY>()
-  const [cat, setCat] = useState<Category | ''>('')
+  // Emplacement et catégorie vivent dans l'état d'interface : ils survivent à la visite d'une fiche espèce.
+  const { planting } = useUi()
+  const mine = planting?.gardenId === garden.id ? planting : undefined
+  const spot: XY | undefined = mine?.spot
+  const cat: Category | '' = mine?.cat ?? ''
+  const setSpot = (p: XY) => setUi({ planting: { gardenId: garden.id, spot: p, cat } })
+  const setCat = (c: Category | '') => setUi({ planting: { gardenId: garden.id, spot, cat: c } })
 
   const analysis = useMemo(() => {
     if (!spot) return undefined
@@ -109,19 +117,28 @@ function BestForSpot({ garden }: { garden: Garden }) {
               </select>
             </label>
           </div>
+          {analysis.recos.length === 0 && (
+            <p className="alert small" style={{ marginTop: 8 }}>
+              Aucune espèce ne convient à cet endroit{cat ? ' dans cette catégorie' : ''}. Essayez un autre emplacement{cat ? ' ou « Toutes » les catégories' : ''}.
+            </p>
+          )}
           <ul className="list" style={{ marginTop: 8 }}>
-            {analysis.recos.map((r) => (
+            {analysis.recos.map((r) => {
+              const label = scoreLabel(r.score)
+              return (
               <li key={r.species.id}>
                 <div className="row" style={{ justifyContent: 'space-between' }}>
                   <button className="btn ghost small" style={{ padding: 0 }} onClick={() => openSpecies(r.species.id)}>
                     <span className="dot" style={{ background: r.species.couleurAccent ?? r.species.couleur }} /> <strong>{r.species.nomCommun}</strong>
                   </button>
                   <div className="row" style={{ gap: 6 }}>
-                    <div className="scorebar" aria-label={`Score ${r.score} sur 100`}>
+                    <div className={'scorebar ' + label.tone} role="img" aria-label={`Score ${r.score} sur 100`}>
                       <div style={{ width: `${r.score}%` }} />
                     </div>
-                    <span className="small">{r.score}</span>
-                    <button className="btn small" onClick={() => (placePlant(garden, r.species.id, spot, 'projet'), setUi({ tab: 'carte' }))}>
+                    <span className={'badge ' + (label.tone === 'green' ? 'green' : label.tone === 'danger' ? 'danger' : '')}>
+                      {label.text} · {r.score}
+                    </span>
+                    <button className="btn small" onClick={() => placePlant(garden, r.species.id, spot, 'projet', { tab: 'carte' })}>
                       Planter ici
                     </button>
                   </div>
@@ -133,9 +150,10 @@ function BestForSpot({ garden }: { garden: Garden }) {
                     .map((f) => `${f.points > 0 ? '+' : '−'} ${f.label}`)
                     .join(' · ')}
                 </div>
-                {r.warnings.length > 0 && <div className="small" style={{ color: 'var(--warn)' }}>⚠ {r.warnings.join(' · ')}</div>}
+                {r.warnings.length > 0 && <div className="small warn-text">⚠ {r.warnings.join(' · ')}</div>}
               </li>
-            ))}
+              )
+            })}
           </ul>
         </div>
       )}

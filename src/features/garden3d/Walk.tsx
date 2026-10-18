@@ -1,6 +1,6 @@
 // Mode Promenade : caméra à hauteur d'yeux (1,65 m), clavier / souris / joystick, niveaux de détail et étiquettes.
 // Tourne dans le canvas ; l'interface (joystick, mini-carte) est dans WalkUI.tsx et partage `WalkShared`.
-import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from 'react'
 import * as THREE from 'three'
 import { useFrame, useThree } from '@react-three/fiber'
 import { Html, PerspectiveCamera } from '@react-three/drei'
@@ -8,15 +8,21 @@ import type { XY } from '../../types'
 import type { Bounds } from './framing'
 import type { HeightSampler } from './terrain'
 import type { PlantVisual } from './plantModel'
+import { DEBUG_3D } from './debug'
 import {
+  EYE_SETTLE_M,
   PITCH_LIMIT,
   WALK_FOV_DEG,
+  createFramePacer,
   entrancePose,
   eyeHeightAt,
   lodFor,
   pickLabelIds,
   poseNearPlant,
   stepWalker,
+  walkKeyBlocked,
+  walkNeedsFrames,
+  type KeyTarget,
   type Collider,
   type DetailLevel,
   type WalkInput,
@@ -28,6 +34,10 @@ import {
 const LOOK_SENS = 0.0042
 /** Période (s) de mise à jour des niveaux de détail, étiquettes et données de contrôle. */
 const SLOW_TICK_S = 0.25
+/** Plafond d'images par seconde en mouvement : 60, ou 45 sur écran tactile (économie de batterie). */
+const MAX_FPS = 60
+const MAX_FPS_COARSE = 45
+const COARSE = typeof window !== 'undefined' && (!!window.matchMedia?.('(pointer: coarse)').matches || navigator.maxTouchPoints > 0)
 
 const KEY_MAP: Record<string, 'forward' | 'back' | 'left' | 'right' | 'turnLeft' | 'turnRight'> = {
   z: 'forward',
@@ -42,12 +52,6 @@ const KEY_MAP: Record<string, 'forward' | 'back' | 'left' | 'right' | 'turnLeft'
   arrowright: 'turnRight',
 }
 
-function isTyping(t: EventTarget | null): boolean {
-  const el = t as HTMLElement | null
-  if (!el || !el.tagName) return false
-  return el.tagName === 'INPUT' || el.tagName === 'SELECT' || el.tagName === 'TEXTAREA' || el.isContentEditable
-}
-
 export interface WalkRigProps {
   shared: WalkShared
   parcel?: XY[]
@@ -56,14 +60,19 @@ export interface WalkRigProps {
   sample: HeightSampler
   visuals: Record<string, PlantVisual>
   selectedPlantId?: string
-  /** Change quand l'utilisateur demande « Recentrer » ou quand la parcelle change. */
+  /** Change quand l'utilisateur demande « Recentrer » (retour à l'entrée) ou change de jardin. Jamais avec l'emprise. */
   resetToken: string
+  /** Incrémenté par « Aller à cette plante » : place le promeneur près de la plante sélectionnée. */
+  gotoToken: number
+  /** Demi-côté (m) du sol texturé : la marche s'arrête à son bord. */
   halfSizeM: number
   compassRef: RefObject<HTMLDivElement>
   onLod: (lod: Record<string, DetailLevel>) => void
+  /** Vrai tant que la limite du jardin retient le promeneur. */
+  onLimit?: (limited: boolean) => void
 }
 
-export function WalkRig({ shared, parcel, bounds, colliders, sample, visuals, selectedPlantId, resetToken, halfSizeM, compassRef, onLod }: WalkRigProps) {
+export function WalkRig({ shared, parcel, bounds, colliders, sample, visuals, selectedPlantId, resetToken, gotoToken, halfSizeM, compassRef, onLod, onLimit }: WalkRigProps) {
   const camRef = useRef<THREE.PerspectiveCamera>(null)
   const gl = useThree((s) => s.gl)
   const invalidate = useThree((s) => s.invalidate)
@@ -72,42 +81,100 @@ export function WalkRig({ shared, parcel, bounds, colliders, sample, visuals, se
   const look = useRef<{ id: number; x: number; y: number } | null>(null)
   const lodRef = useRef<Record<string, DetailLevel>>({})
   const tick = useRef(0)
-  const first = useRef(true)
+  const lastReset = useRef<string | null>(null)
   const [labelIds, setLabelIds] = useState<string[]>([])
   const live = useRef({ parcel, bounds, colliders, sample, visuals, selectedPlantId })
   live.current = { parcel, bounds, colliders, sample, visuals, selectedPlantId }
 
-  // Pose de départ : près de la plante sélectionnée, sinon reprise de la dernière position, sinon entrée de la parcelle.
-  useLayoutEffect(() => {
-    const { parcel: pc, bounds: b, colliders: cols, sample: smp, visuals: vis, selectedPlantId: sel } = live.current
-    const resume = first.current && shared.saved
-    first.current = false
-    const entrance = entrancePose(pc, b, cols)
-    const from: XY = shared.saved ? { x: shared.pose.x, y: shared.pose.y } : entrance
-    const v = sel ? vis[sel] : undefined
-    let w: Walker
-    if (v) w = poseNearPlant({ x: v.base[0], y: -v.base[2] }, from, 3, cols)
-    else if (resume) w = { x: shared.pose.x, y: shared.pose.y, yaw: shared.pose.yaw }
-    else w = entrance
-    shared.pose = { ...w, pitch: v ? 0.04 : resume ? shared.pose.pitch : 0 }
-    shared.eyeY = eyeHeightAt(smp, w)
-    shared.saved = true
-    lodRef.current = {}
-    tick.current = SLOW_TICK_S // force une mise à jour immédiate des détails
-    invalidate()
-  }, [resetToken, shared, invalidate])
+  // Rendu à la demande : une image seulement quand quelque chose bouge (touche, joystick, regard, lissage de hauteur).
+  const pacer = useMemo(() => createFramePacer(COARSE ? MAX_FPS_COARSE : MAX_FPS), [])
+  const raf = useRef(0)
+  const wasActive = useRef(false)
+  const limitHit = useRef(false)
+  const limitShown = useRef(false)
+  const onLimitRef = useRef(onLimit)
+  onLimitRef.current = onLimit
+  /** Demande l'image suivante en respectant le plafond d'images par seconde. */
+  const requestPaced = useCallback(() => {
+    if (raf.current) return
+    const loop = () => {
+      raf.current = 0
+      if (pacer.due(performance.now())) invalidate()
+      else raf.current = requestAnimationFrame(loop)
+    }
+    raf.current = requestAnimationFrame(loop)
+  }, [pacer, invalidate])
+  useEffect(() => {
+    shared.wake = requestPaced
+    return () => {
+      shared.wake = undefined
+      if (raf.current) cancelAnimationFrame(raf.current)
+      raf.current = 0
+    }
+  }, [shared, requestPaced])
 
-  // Clavier.
+  const applyPose = useCallback(
+    (w: Walker, pitch: number) => {
+      shared.pose = { ...w, pitch }
+      shared.eyeY = eyeHeightAt(live.current.sample, w)
+      shared.saved = true
+      lodRef.current = {}
+      tick.current = SLOW_TICK_S // force une mise à jour immédiate des détails
+      invalidate()
+    },
+    [shared, invalidate],
+  )
+
+  // Pose de départ : près de la plante sélectionnée, sinon reprise de la dernière position, sinon entrée de la parcelle.
+  // Ensuite, seul « Recentrer » ou un autre jardin (resetToken) ramène à l'entrée : l'emprise ne déplace jamais le promeneur.
+  useLayoutEffect(() => {
+    const { parcel: pc, bounds: b, colliders: cols, visuals: vis, selectedPlantId: sel } = live.current
+    if (lastReset.current === resetToken) return // double exécution (mode strict) : déjà appliqué
+    const initial = lastReset.current === null
+    lastReset.current = resetToken
+    const entrance = entrancePose(pc, b, cols)
+    if (!initial) {
+      applyPose(entrance, 0) // « Recentrer » ou autre jardin
+      return
+    }
+    const resume = shared.saved
+    const from: XY = resume ? { x: shared.pose.x, y: shared.pose.y } : entrance
+    const v = sel ? vis[sel] : undefined
+    if (v) applyPose(poseNearPlant({ x: v.base[0], y: -v.base[2] }, from, 3, cols), 0.04)
+    else if (resume) applyPose({ x: shared.pose.x, y: shared.pose.y, yaw: shared.pose.yaw }, shared.pose.pitch)
+    else applyPose(entrance, 0)
+  }, [resetToken, shared, applyPose])
+
+  // « Aller à cette plante » : se place près de la plante sélectionnée, en la regardant.
+  const gotoSeen = useRef(gotoToken)
+  useLayoutEffect(() => {
+    if (gotoSeen.current === gotoToken) return
+    gotoSeen.current = gotoToken
+    const { colliders: cols, visuals: vis, selectedPlantId: sel } = live.current
+    const v = sel ? vis[sel] : undefined
+    if (!v) return
+    applyPose(poseNearPlant({ x: v.base[0], y: -v.base[2] }, { x: shared.pose.x, y: shared.pose.y }, 3, cols), 0.04)
+  }, [gotoToken, shared, applyPose])
+
+  // Clavier. Seuls les champs de texte gardent leurs touches ; un curseur (range) garde ses flèches, mais ZQSD marchent.
   useEffect(() => {
     const k = keys.current
     const onKey = (down: boolean) => (e: KeyboardEvent) => {
       k.shift = e.shiftKey
-      if (e.ctrlKey || e.metaKey || e.altKey || isTyping(e.target)) return
       const action = KEY_MAP[e.key.toLowerCase()]
       if (!action) return
-      k[action] = down
+      if (!down) {
+        // Le relâchement compte toujours : sinon une touche resterait « enfoncée » si le focus change entre-temps.
+        if (k[action]) {
+          k[action] = false
+          requestPaced()
+        }
+        return
+      }
+      if (e.ctrlKey || e.metaKey || e.altKey || walkKeyBlocked(e.target as KeyTarget | null, e.key)) return
+      k[action] = true
       e.preventDefault()
-      invalidate()
+      requestPaced()
     }
     const down = onKey(true)
     const up = onKey(false)
@@ -123,7 +190,7 @@ export function WalkRig({ shared, parcel, bounds, colliders, sample, visuals, se
       window.removeEventListener('blur', clear)
       clear()
     }
-  }, [invalidate])
+  }, [requestPaced])
 
   // Regarder en glissant (souris ou doigt) ; un simple clic / toucher reste une sélection.
   useEffect(() => {
@@ -150,6 +217,7 @@ export function WalkRig({ shared, parcel, bounds, colliders, sample, visuals, se
       p.yaw -= dx * LOOK_SENS
       p.pitch = Math.max(-PITCH_LIMIT, Math.min(PITCH_LIMIT, p.pitch - dy * LOOK_SENS))
       el.style.cursor = 'grabbing'
+      requestPaced()
     }
     const onUp = (e: PointerEvent) => {
       if (!look.current || look.current.id !== e.pointerId) return
@@ -160,6 +228,8 @@ export function WalkRig({ shared, parcel, bounds, colliders, sample, visuals, se
       } catch {
         /* déjà relâché */
       }
+      tick.current = SLOW_TICK_S // étiquettes et détails à jour pour la direction finale du regard
+      requestPaced()
     }
     const noMenu = (e: Event) => e.preventDefault()
     el.addEventListener('pointerdown', onDown)
@@ -176,7 +246,7 @@ export function WalkRig({ shared, parcel, bounds, colliders, sample, visuals, se
       el.style.cursor = prevCursor
       look.current = null
     }
-  }, [gl, shared])
+  }, [gl, shared, requestPaced])
 
   // Quitte le mode : repasse en rendu à la demande après une dernière image.
   useEffect(() => () => invalidate(), [invalidate])
@@ -194,22 +264,31 @@ export function WalkRig({ shared, parcel, bounds, colliders, sample, visuals, se
     inp.strafe = Math.max(-1, Math.min(1, (k.right ? 1 : 0) - (k.left ? 1 : 0) + shared.joy.x))
     inp.turn = (k.turnLeft ? 1 : 0) - (k.turnRight ? 1 : 0)
     inp.run = k.shift || shared.run
+    // Après un arrêt, la première image arrive longtemps après la précédente : pas de saut.
+    const dt = wasActive.current ? delta : Math.min(delta, 1 / 30)
     const p = shared.pose
-    const next = stepWalker(p, inp, delta, { colliders: cols, bounds: b })
+    const next = stepWalker(p, inp, dt, { colliders: cols, bounds: b, groundHalfM: halfSizeM - 1 })
     p.x = next.x
     p.y = next.y
     p.yaw = next.yaw
+    if (next.limited) limitHit.current = true
 
     // Hauteur des yeux : relief + 1,65 m, légèrement lissée pour gommer les arêtes de la grille d'altitudes.
     const target = eyeHeightAt(smp, p)
-    shared.eyeY += (target - shared.eyeY) * (1 - Math.exp(-14 * Math.min(delta, 0.1)))
+    if (Math.abs(target - shared.eyeY) <= EYE_SETTLE_M) shared.eyeY = target
+    else shared.eyeY += (target - shared.eyeY) * (1 - Math.exp(-14 * Math.min(dt, 0.1)))
     cam.position.set(p.x, shared.eyeY, -p.y)
     cam.rotation.set(p.pitch, p.yaw, 0, 'YXZ')
     if (compassRef.current) compassRef.current.style.transform = `rotate(${p.yaw}rad)`
 
-    // Tâches lentes : niveaux de détail, étiquettes, données de contrôle.
-    tick.current += delta
-    if (tick.current >= SLOW_TICK_S) {
+    // Encore des images à produire ? Oui si on bouge ou si la hauteur des yeux n'a pas convergé. Sinon la scène reste figée.
+    const active = walkNeedsFrames(inp, target - shared.eyeY)
+    const justStopped = wasActive.current && !active
+    wasActive.current = active
+
+    // Tâches lentes : niveaux de détail, étiquettes, limite du jardin. Une dernière passe à l'arrêt.
+    tick.current += dt
+    if (tick.current >= SLOW_TICK_S || justStopped) {
       tick.current = 0
       const prev = lodRef.current
       const nextLod: Record<string, DetailLevel> = {}
@@ -236,19 +315,28 @@ export function WalkRig({ shared, parcel, bounds, colliders, sample, visuals, se
       const halfFov = Math.min(1.25, Math.atan(Math.tan((WALK_FOV_DEG * Math.PI) / 360) * (size.width / Math.max(1, size.height))) + 0.15)
       const ids = pickLabelIds(p, p.yaw, list, { rangeM: 8, max: 8, halfFovRad: halfFov })
       setLabelIds((old) => (old.length === ids.length && old.every((v, i) => v === ids[i]) ? old : ids))
-      const root = gl.domElement.closest('.g3d-root') as HTMLElement | null
-      if (root) {
-        root.dataset.walkX = p.x.toFixed(2)
-        root.dataset.walkY = p.y.toFixed(2)
-        root.dataset.walkYaw = p.yaw.toFixed(3)
-        root.dataset.eyeY = shared.eyeY.toFixed(3)
-        root.dataset.groundY = smp(p.x, p.y).toFixed(3)
-        root.dataset.detailPlants = String(n)
-        root.dataset.drawCalls = String(gl.info.render.calls)
-        root.dataset.triangles = String(gl.info.render.triangles)
+      if (limitHit.current !== limitShown.current) {
+        limitShown.current = limitHit.current
+        onLimitRef.current?.(limitHit.current)
+      }
+      limitHit.current = false
+      if (DEBUG_3D) {
+        const root = gl.domElement.closest('.g3d-root') as HTMLElement | null
+        if (root) {
+          root.dataset.walkX = p.x.toFixed(2)
+          root.dataset.walkY = p.y.toFixed(2)
+          root.dataset.walkYaw = p.yaw.toFixed(3)
+          root.dataset.eyeY = shared.eyeY.toFixed(3)
+          root.dataset.groundY = smp(p.x, p.y).toFixed(3)
+          root.dataset.detailPlants = String(n)
+          root.dataset.drawCalls = String(gl.info.render.calls)
+          root.dataset.triangles = String(gl.info.render.triangles)
+          root.dataset.frames = String(gl.info.render.frame)
+        }
       }
     }
-    invalidate() // rendu continu tant qu'on se promène
+    pacer.mark(performance.now())
+    if (active) requestPaced()
   })
 
   return (

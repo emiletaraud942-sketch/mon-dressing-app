@@ -1,14 +1,20 @@
 import { useMemo, useState } from 'react'
+import { Tabs, TabPanel } from '../../components/Tabs'
 import { SPECIES_BY_ID } from '../../data/species'
 import { TASK_ICON, TASK_LABEL } from '../../data/labels'
 import { markTaskDone, unmarkTask, useGardenPlants, useStore } from '../../lib/store'
 import { enableNotifications, notificationsSupported } from '../../lib/notify'
+import { showToast } from '../../lib/toast'
 import { uid } from '../../lib/geo'
 import { setUi } from '../../lib/ui'
 import { MONTH_NAMES } from '../../engine/calendar'
 import { waterBalance, yearPlan } from '../../engine/tasks'
-import type { Garden, GeneratedTask, WeatherBundle } from '../../types'
+import type { Garden, GeneratedTask, TaskType, WeatherBundle } from '../../types'
 import { useTasks } from './useTasks'
+import { doneTaskLabel } from './taskLabel'
+
+/** Types de tâches dont la faisabilité dépend de la météo : grisés tant qu'elle n'est pas chargée. */
+const WEATHER_TYPES = new Set<TaskType>(['arrosage', 'desherbage', 'taille', 'traitement', 'protection'])
 
 function WeatherStrip({ weather }: { weather: WeatherBundle }) {
   const wb = waterBalance(weather)
@@ -44,41 +50,48 @@ function WeatherStrip({ weather }: { weather: WeatherBundle }) {
   )
 }
 
-function TaskItem({ garden, task }: { garden: Garden; task: GeneratedTask }) {
+function TaskItem({ garden, task, weatherPending }: { garden: Garden; task: GeneratedTask; weatherPending: boolean }) {
   const plants = useGardenPlants(garden.id)
   const names = task.plantIds.length
   return (
-    <li className={'task' + (task.blockedBy ? ' blocked' : '')}>
-      <input
-        type="checkbox"
-        aria-label={`Marquer « ${task.title} » comme fait`}
-        onChange={() => markTaskDone({ id: uid(), gardenId: garden.id, taskKey: task.key, doneAt: new Date().toISOString() })}
-      />
-      <div style={{ flex: 1 }}>
-        <div className="row" style={{ gap: 6 }}>
-          <span aria-hidden>{TASK_ICON[task.type]}</span>
-          <strong className="task-title">{task.title}</strong>
-          {task.priority === 'haute' && !task.blockedBy && <span className="badge warn">Prioritaire</span>}
-          {task.blockedBy && <span className="badge">{task.blockedBy}</span>}
-        </div>
-        <div className="small">{task.howTo}</div>
-        <div className="small muted">
-          {task.reason}
-          {task.tool ? ` · Outil : ${task.tool}` : ''}
-        </div>
-        {names > 0 && (
-          <div className="row small" style={{ gap: 4, marginTop: 4 }}>
-            {task.plantIds.slice(0, 8).map((id) => {
-              const p = plants.find((x) => x.id === id)
-              return (
-                <button key={id} className="btn small ghost" style={{ minHeight: 26, padding: '0 6px' }} onClick={() => setUi({ tab: 'carte', selectedPlantId: id })}>
-                  📍 {p?.customName || SPECIES_BY_ID[p?.speciesId ?? '']?.nomCommun || 'plante'}
-                </button>
-              )
-            })}
+    <li className={'task' + (task.blockedBy ? ' blocked' : '') + (weatherPending ? ' weather-pending' : '')}>
+      <label className="task-main">
+        <input
+          type="checkbox"
+          aria-label={`Marquer « ${task.title} » comme fait`}
+          onChange={() => {
+            markTaskDone({ id: uid(), gardenId: garden.id, taskKey: task.key, doneAt: new Date().toISOString() })
+            showToast({ message: `Fait : ${task.title}`, actionLabel: 'Annuler', onAction: () => unmarkTask(garden.id, task.key) })
+          }}
+        />
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div className="row" style={{ gap: 6 }}>
+            <span aria-hidden>{TASK_ICON[task.type]}</span>
+            <strong className="task-title">{task.title}</strong>
+            {task.priority === 'haute' && !task.blockedBy && <span className="badge warn">Prioritaire</span>}
+            {task.blockedBy && <span className="badge">{task.blockedBy}</span>}
+            {weatherPending && <span className="badge">météo en attente</span>}
           </div>
-        )}
-      </div>
+          <div className="small">{task.howTo}</div>
+          <div className="small muted">
+            {task.reason}
+            {task.tool ? ` · Outil : ${task.tool}` : ''}
+          </div>
+        </div>
+      </label>
+      {names > 0 && (
+        <div className="row small task-plants">
+          {task.plantIds.slice(0, 8).map((id) => {
+            const p = plants.find((x) => x.id === id)
+            return (
+              <button key={id} className="btn small ghost" onClick={() => setUi({ tab: 'carte', selectedPlantId: id })}>
+                📍 {p?.customName || SPECIES_BY_ID[p?.speciesId ?? '']?.nomCommun || 'plante'}
+              </button>
+            )
+          })}
+          {names > 8 && <span className="muted">+ {names - 8}</span>}
+        </div>
+      )}
     </li>
   )
 }
@@ -109,7 +122,7 @@ function YearPlan({ garden }: { garden: Garden }) {
 }
 
 export function TasksPage({ garden }: { garden: Garden }) {
-  const { tasks, weather, weatherError } = useTasks(garden)
+  const { tasks, weather, weatherError, weatherLoading } = useTasks(garden)
   const plants = useGardenPlants(garden.id)
   const allDone = useStore((s) => s.tasksDone)
   const done = useMemo(() => allDone.filter((t) => t.gardenId === garden.id), [allDone, garden.id])
@@ -129,19 +142,31 @@ export function TasksPage({ garden }: { garden: Garden }) {
           </button>
         )}
       </div>
-      <div className="tabs" role="tablist">
-        <button role="tab" aria-selected={view === 'semaine'} onClick={() => setView('semaine')}>
-          Cette semaine
-        </button>
-        <button role="tab" aria-selected={view === 'annee'} onClick={() => setView('annee')}>
-          Calendrier de l'année
-        </button>
-      </div>
-
+      <Tabs
+        idPrefix="entretien"
+        label="Vue de l'entretien"
+        value={view}
+        onChange={setView}
+        tabs={[
+          { id: 'semaine', label: 'Cette semaine' },
+          { id: 'annee', label: "Calendrier de l'année" },
+        ]}
+      />
+      <TabPanel idPrefix="entretien" active={view}>
       {view === 'annee' ? (
         <YearPlan garden={garden} />
       ) : (
         <div className="stack" style={{ gap: 12 }}>
+          {weatherLoading && !weather && (
+            <p className="small muted" role="status">
+              <span className="spinner" /> Météo en cours de chargement…
+            </p>
+          )}
+          {weather?.stale && (
+            <div className="alert small">
+              Météo hors ligne — données du {new Date(weather.fetchedAt).toLocaleString('fr-FR', { day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' })}.
+            </div>
+          )}
           {weather && <WeatherStrip weather={weather} />}
           {weatherError && <div className="alert small">Météo indisponible ({weatherError}) : les tâches sont calculées sans conditions météo.</div>}
           {plants.length === 0 ? (
@@ -157,7 +182,7 @@ export function TasksPage({ garden }: { garden: Garden }) {
               {open.length === 0 && <p className="muted">Rien d'urgent : profitez du jardin.</p>}
               <ul className="list">
                 {open.map((t) => (
-                  <TaskItem key={t.key} garden={garden} task={t} />
+                  <TaskItem key={t.key} garden={garden} task={t} weatherPending={!weather && weatherLoading && WEATHER_TYPES.has(t.type)} />
                 ))}
               </ul>
               {blocked.length > 0 && (
@@ -165,7 +190,7 @@ export function TasksPage({ garden }: { garden: Garden }) {
                   <h3 style={{ marginTop: 16 }}>En attente de la météo ({blocked.length})</h3>
                   <ul className="list">
                     {blocked.map((t) => (
-                      <TaskItem key={t.key} garden={garden} task={t} />
+                      <TaskItem key={t.key} garden={garden} task={t} weatherPending={!weather && weatherLoading && WEATHER_TYPES.has(t.type)} />
                     ))}
                   </ul>
                 </>
@@ -179,7 +204,7 @@ export function TasksPage({ garden }: { garden: Garden }) {
                 {recent.map((d) => (
                   <li key={d.id} className="row" style={{ justifyContent: 'space-between' }}>
                     <span>
-                      ✓ {d.taskKey.split(':').slice(1, 3).map((x) => SPECIES_BY_ID[x]?.nomCommun ?? TASK_LABEL[x as keyof typeof TASK_LABEL] ?? x).join(' · ')}{' '}
+                      ✓ {doneTaskLabel(d.taskKey, (id) => SPECIES_BY_ID[id]?.nomCommun)}{' '}
                       <span className="muted">le {new Date(d.doneAt).toLocaleDateString('fr-FR')}</span>
                     </span>
                     <button className="btn small ghost" onClick={() => unmarkTask(garden.id, d.taskKey)}>
@@ -192,6 +217,7 @@ export function TasksPage({ garden }: { garden: Garden }) {
           )}
         </div>
       )}
+      </TabPanel>
     </div>
   )
 }

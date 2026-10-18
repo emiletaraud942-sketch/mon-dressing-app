@@ -3,11 +3,13 @@ import { CATEGORY_LABEL, STATUS_LABEL, TASK_ICON } from '../../data/labels'
 import { Icon } from '../../components/Icon'
 import { PhotoThumb } from '../../components/PhotoThumb'
 import { deletePhoto, savePhoto } from '../../lib/photos'
-import { removePlant, updatePlant, useGardenPlants } from '../../lib/store'
-import { openSpecies, setUi } from '../../lib/ui'
+import { addPlant, getState, removePlant, updatePlant, useGardenPlants } from '../../lib/store'
+import { showToast } from '../../lib/toast'
+import { closePlantSheet, openSpecies, setUi, startPlacing } from '../../lib/ui'
 import { plantAgeYears, plantSizeAt } from '../../engine/growth'
 import { companionReport, legalDistance } from '../../engine/planting'
 import type { Garden, Plant, PlantStatus } from '../../types'
+import { useState } from 'react'
 import { useTasks } from '../tasks/useTasks'
 
 export function plantName(p: Plant): string {
@@ -24,11 +26,60 @@ export function PlantPanel({ garden, plant, onClose }: { garden: Garden; plant: 
   const report = species ? companionReport(plant, plants, SPECIES_BY_ID) : { amis: [], ennemis: [] }
   const legal = species ? legalDistance(species, plant.position, garden.parcel) : undefined
 
-  async function addPhotos(files: FileList | null) {
-    if (!files) return
+  const [photoBusy, setPhotoBusy] = useState(false)
+  const [photoError, setPhotoError] = useState<string>()
+
+  async function addPhotos(input: HTMLInputElement) {
+    const files = Array.from(input.files ?? [])
+    input.value = '' // permet de rechoisir la même photo
+    if (!files.length) return
+    setPhotoBusy(true)
+    setPhotoError(undefined)
     const ids: string[] = []
-    for (const f of Array.from(files)) ids.push(await savePhoto(f))
-    updatePlant(plant.id, { photos: [...plant.photos, ...ids] })
+    let failed = 0
+    for (const f of files) {
+      try {
+        ids.push(await savePhoto(f))
+      } catch (e) {
+        failed++
+        console.warn('Photo non enregistrée', e)
+      }
+    }
+    if (ids.length) updatePlant(plant.id, { photos: [...(getState().plants.find((p) => p.id === plant.id)?.photos ?? plant.photos), ...ids] })
+    if (failed) setPhotoError(failed === files.length ? "Photo non enregistrée : format non reconnu ou stockage plein." : `${failed} photo(s) sur ${files.length} non enregistrée(s) (format non reconnu ou stockage plein).`)
+    setPhotoBusy(false)
+  }
+
+  function removePhoto(id: string) {
+    updatePlant(plant.id, { photos: plant.photos.filter((x) => x !== id) })
+    showToast({
+      message: 'Photo supprimée.',
+      actionLabel: 'Annuler',
+      onAction: () => {
+        const cur = getState().plants.find((p) => p.id === plant.id)
+        if (cur && !cur.photos.includes(id)) updatePlant(plant.id, { photos: [...cur.photos, id] })
+      },
+      onExpire: () => {
+        // Supprimée pour de bon, sauf si elle a été remise entre-temps.
+        const cur = getState().plants.find((p) => p.id === plant.id)
+        if (!cur?.photos.includes(id)) void deletePhoto(id)
+      },
+    })
+  }
+
+  function remove() {
+    const name = plantName(plant)
+    removePlant(plant.id, { keepPhotos: true })
+    closePlantSheet()
+    showToast({
+      message: `« ${name} » supprimée du jardin.`,
+      actionLabel: 'Annuler',
+      onAction: () => addPlant(plant),
+      // Les photos ne sont effacées qu'une fois le délai d'annulation passé.
+      onExpire: () => {
+        if (!getState().plants.some((p) => p.id === plant.id)) plant.photos.forEach((id) => void deletePhoto(id))
+      },
+    })
   }
 
   return (
@@ -61,13 +112,13 @@ export function PlantPanel({ garden, plant, onClose }: { garden: Garden; plant: 
           </select>
         </label>
         <label className="field">
-          <span>Planté le</span>
+          <span>{plant.status === 'projet' ? 'Prévu le' : 'Planté le'}</span>
           <input className="input" type="date" value={plant.plantedAt.slice(0, 10)} onChange={(e) => e.target.value && updatePlant(plant.id, { plantedAt: e.target.value })} />
         </label>
         {species?.vivace && (
           <label className="field">
             <span>Âge à la plantation (ans)</span>
-            <input className="input" type="number" min={0} max={50} value={plant.ageAtPlanting ?? 0} onChange={(e) => updatePlant(plant.id, { ageAtPlanting: Number(e.target.value) || 0 })} />
+            <input className="input" type="number" min={0} max={50} inputMode="decimal" placeholder="0" value={plant.ageAtPlanting ?? ''} onChange={(e) => updatePlant(plant.id, { ageAtPlanting: e.target.value === '' ? undefined : Math.max(0, Number(e.target.value) || 0) })} />
           </label>
         )}
         {size && species && (
@@ -120,26 +171,19 @@ export function PlantPanel({ garden, plant, onClose }: { garden: Garden; plant: 
         <div className="row">
           {plant.photos.map((id) => (
             <div key={id} style={{ position: 'relative' }}>
-              <PhotoThumb id={id} />
-              <button
-                className="btn small ghost"
-                style={{ position: 'absolute', top: -6, right: -6, minHeight: 24, padding: 2, background: 'var(--surface)' }}
-                aria-label="Supprimer la photo"
-                onClick={() => {
-                  deletePhoto(id)
-                  updatePlant(plant.id, { photos: plant.photos.filter((x) => x !== id) })
-                }}
-              >
+              <PhotoThumb id={id} zoomable />
+              <button className="photo-remove" aria-label="Supprimer la photo" onClick={() => removePhoto(id)}>
                 <Icon name="x" size={14} />
               </button>
             </div>
           ))}
-          <label className="btn small" style={{ height: 72, width: 72, flexDirection: 'column' }}>
-            <Icon name="camera" />
+          <label className="btn small photo-add">
+            {photoBusy ? <span className="spinner" /> : <Icon name="camera" />}
             <span className="small">Ajouter</span>
-            <input type="file" accept="image/*" capture="environment" multiple hidden onChange={(e) => addPhotos(e.target.files)} />
+            <input className="sr-only" type="file" accept="image/*" multiple disabled={photoBusy} onChange={(e) => void addPhotos(e.target)} />
           </label>
         </div>
+        {photoError && <p className="alert error small" role="alert" style={{ marginTop: 8 }}>{photoError}</p>}
       </div>
 
       <label className="field">
@@ -147,22 +191,20 @@ export function PlantPanel({ garden, plant, onClose }: { garden: Garden; plant: 
         <textarea className="input" rows={3} value={plant.notes ?? ''} onChange={(e) => updatePlant(plant.id, { notes: e.target.value })} placeholder="Variété, fournisseur, observations…" />
       </label>
 
+      <button
+        className="btn"
+        onClick={() => startPlacing(plant.speciesId, { customName: plant.customName, series: true })}
+      >
+        <Icon name="plus" size={16} /> Placer une autre « {plantName(plant)} »
+      </button>
+
       <div className="row">
         {species && (
           <button className="btn small" onClick={() => openSpecies(species.id)}>
             <Icon name="book" size={16} /> Fiche entretien
           </button>
         )}
-        <button
-          className="btn small danger"
-          onClick={() => {
-            if (confirm(`Supprimer « ${plantName(plant)} » du jardin ?`)) {
-              plant.photos.forEach(deletePhoto)
-              removePlant(plant.id)
-              setUi({ selectedPlantId: undefined })
-            }
-          }}
-        >
+        <button className="btn small danger" onClick={remove}>
           <Icon name="trash" size={16} /> Supprimer
         </button>
       </div>

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { VercelRequest, VercelResponse } from '@vercel/node'
-import handler, { clientIp, createRateLimiter, detectImageMime, interpretPlantnet, isAllowedOrigin, MAX_BODY_BYTES, scrubError } from './identify'
+import handler, { clientIp, createRateLimiter, detectImageMime, interpretPlantnet, isAllowedOrigin, MAX_BODY_BYTES, scrubError } from '../identify'
 
 const JPEG = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0, 0x10, 0x4a, 0x46])
 const PNG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0])

@@ -15,6 +15,7 @@ export function Joystick({ shared }: { shared: WalkShared }) {
   const set = (nx: number, ny: number) => {
     shared.joy.x = nx
     shared.joy.y = -ny
+    shared.wake?.() // rendu à la demande : réveille la boucle de la Promenade
     if (knobRef.current) knobRef.current.style.transform = `translate(${nx * STICK_TRAVEL_PX}px, ${ny * STICK_TRAVEL_PX}px)`
   }
   const move = (e: React.PointerEvent) => {

@@ -8,6 +8,7 @@ import type { Building, LonLat, TerrainGrid, XY } from '../../types'
 import { orthoTextureUrl } from '../../lib/ign'
 import { buildTerrainGeometry, densifyRing, terrainSegments, type HeightSampler } from './terrain'
 import { createGroundDetail } from './groundDetail'
+import { heatmapUvTransform } from './heatmap'
 
 /** Charge l'orthophoto ; renvoie null tant qu'elle n'est pas prête ou si elle échoue (repli vert). */
 function useOrthoTexture(center: LonLat, halfSizeM: number, px: number): THREE.Texture | null {
@@ -129,7 +130,12 @@ function cleanRing(ring: XY[]): XY[] {
   return r
 }
 
+// Matériau partagé des bâtiments ; libéré au démontage de la vue 3D, recréé à la demande.
 let buildingMaterial: THREE.MeshStandardMaterial | null = null
+export function disposeBuildingMaterial(): void {
+  buildingMaterial?.dispose()
+  buildingMaterial = null
+}
 
 /** Tous les bâtiments fusionnés en une seule géométrie (un seul appel de dessin). */
 export function Buildings({ buildings, sample }: { buildings: Building[]; sample: HeightSampler }) {
@@ -222,6 +228,11 @@ export function HeatmapLayer({ map, sample }: { map: SunHeatmap; sample: HeightS
     t.colorSpace = THREE.SRGBColorSpace
     t.magFilter = THREE.LinearFilter
     t.minFilter = THREE.LinearFilter
+    // sunHoursGrid échantillonne sur les nœuds (bords inclus), les texels sont centrés en (i+0,5)/n :
+    // repeat/offset recalent le nœud i sur le centre du texel i (sans cela, décalage d'un demi-texel).
+    const { repeat, offset } = heatmapUvTransform(n)
+    t.repeat.set(repeat, repeat)
+    t.offset.set(offset, offset)
     t.needsUpdate = true
     return t
   }, [map])

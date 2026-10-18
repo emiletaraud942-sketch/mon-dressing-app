@@ -21,12 +21,26 @@ export function IdentifyDialog({ onClose }: { onClose: () => void }) {
   const [error, setError] = useState<string>()
   const [busy, setBusy] = useState(false)
 
-  async function add(files: FileList | null) {
-    if (!files) return
+  async function add(input: HTMLInputElement) {
+    const files = Array.from(input.files ?? []).slice(0, 5 - photos.length)
+    input.value = ''
+    if (!files.length) return
+    setError(undefined)
     const ids: string[] = []
-    for (const f of Array.from(files).slice(0, 5 - photos.length)) ids.push(await savePhoto(f))
-    setPhotos((p) => [...p, ...ids])
-    setResults(undefined)
+    let failed = 0
+    for (const f of files) {
+      try {
+        ids.push(await savePhoto(f))
+      } catch (e) {
+        failed++
+        console.warn('Photo non enregistrée', e)
+      }
+    }
+    if (failed) setError(failed === files.length ? 'Photo illisible. Essayez un autre format (JPEG ou PNG) ou une autre photo.' : `${failed} photo(s) illisible(s) ignorée(s).`)
+    if (ids.length) {
+      setPhotos((p) => [...p, ...ids])
+      setResults(undefined)
+    }
   }
 
   async function run() {
@@ -34,6 +48,7 @@ export function IdentifyDialog({ onClose }: { onClose: () => void }) {
     setError(undefined)
     try {
       const blobs = (await Promise.all(photos.map(getPhoto))).filter((b): b is Blob => !!b)
+      if (blobs.length === 0) throw new Error('Les photos ne sont plus disponibles. Reprenez-les.')
       setResults(await identifyPlant(blobs, organ))
     } catch (e) {
       setError((e as Error).message)
@@ -62,18 +77,18 @@ export function IdentifyDialog({ onClose }: { onClose: () => void }) {
       </p>
       <div className="row" style={{ marginBottom: 12 }}>
         {photos.map((id) => (
-          <PhotoThumb key={id} id={id} />
+          <PhotoThumb key={id} id={id} zoomable />
         ))}
         {photos.length < 5 && (
-          <label className="btn" style={{ height: 72, width: 72, flexDirection: 'column' }}>
+          <label className="btn photo-add">
             <Icon name="camera" />
             <span className="small">Photo</span>
-            <input type="file" accept="image/*" capture="environment" multiple hidden onChange={(e) => add(e.target.files)} />
+            <input className="sr-only" type="file" accept="image/*" multiple onChange={(e) => void add(e.target)} />
           </label>
         )}
       </div>
       <div className="row" style={{ marginBottom: 12 }}>
-        <select className="input" style={{ width: 'auto' }} value={organ} onChange={(e) => setOrgan(e.target.value as typeof organ)} aria-label="Partie photographiée">
+        <select className="input" style={{ width: 'auto', flex: '1 1 140px' }} value={organ} onChange={(e) => setOrgan(e.target.value as typeof organ)} aria-label="Partie photographiée">
           {ORGANS.map(([k, v]) => (
             <option key={k} value={k}>
               {v}
@@ -95,6 +110,7 @@ export function IdentifyDialog({ onClose }: { onClose: () => void }) {
                 <div className="small">
                   {Math.round(r.score * 100)} % de confiance
                   {r.species ? <span className="badge green" style={{ marginLeft: 6 }}>Fiche : {r.species.nomCommun}</span> : <span className="badge" style={{ marginLeft: 6 }}>Hors catalogue</span>}
+                  {r.species && r.approx && <span className="badge warn" style={{ marginLeft: 6 }}>Espèce proche (même genre)</span>}
                 </div>
               </div>
               <button className="btn small" onClick={() => choose(r)}>

@@ -1,16 +1,16 @@
 // Contenu du canvas : lumière solaire, caméra, sol, bâtiments, plantes et interactions.
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentRef, type RefObject } from 'react'
 import * as THREE from 'three'
 import { useFrame, useThree, type ThreeEvent } from '@react-three/fiber'
 import { Html, OrbitControls, OrthographicCamera, PerspectiveCamera } from '@react-three/drei'
-import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib'
 import type { Garden, Plant, Species, XY } from '../../types'
 import { Buildings, Ground, HeatmapLayer, ParcelOutline, type SunHeatmap } from './Ground'
-import { Plants, type PlantPointerHandlers } from './Plants'
+import { Plants, type PlantPointerHandlers, type PlantsHandle } from './Plants'
 import { buildPlantScene } from './plantModel'
 import { makeHeightSampler } from './terrain'
 import type { SunState } from './sun'
-import { fitOrtho, fitPerspective, orthoPixels, type Frame, type Insets, type ViewMode } from './framing'
+import { fitOrtho, fitPerspective, orthoPixels, viewResetToken, walkResetToken, type Frame, type Insets, type ViewMode } from './framing'
+import { groundPointOnRay } from './drag'
 import { makeColliders, type DetailLevel, type WalkShared } from './walk'
 import { WalkRig } from './Walk'
 
@@ -30,8 +30,12 @@ export interface SceneProps {
   mode: ViewMode
   /** Emprise de la parcelle (cadrage) et clé de recadrage automatique. */
   frame: Frame
-  /** Incrémenté par « Recentrer sur le jardin ». */
+  /** Incrémenté par « Recentrer » (cadrage, ou retour à l'entrée en Promenade). */
   fitNonce: number
+  /** Incrémenté par « Aller à cette plante » (Promenade). */
+  gotoNonce: number
+  /** Vrai tant que la limite du jardin retient le promeneur. */
+  onWalkLimit?: (limited: boolean) => void
   /** Mesure les bandeaux de l'interface (px) pour cadrer dans la zone réellement visible. */
   getInsets: () => Insets
   walkShared: WalkShared
@@ -43,6 +47,8 @@ export interface SceneProps {
   month: number
   compassRef: RefObject<HTMLDivElement>
 }
+
+type OrbitControlsImpl = ComponentRef<typeof OrbitControls>
 
 const DRAG_THRESHOLD_PX = 6
 const TOP_MOUSE = { LEFT: THREE.MOUSE.PAN, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.PAN }
@@ -119,6 +125,7 @@ function SunAndSky({ sun, halfSizeM, walking }: { sun: SunState; halfSizeM: numb
 
 function CameraRig({
   mode,
+  gardenId,
   frame,
   nonce,
   halfSizeM,
@@ -128,6 +135,7 @@ function CameraRig({
   compassRef,
 }: {
   mode: 'dessus' | 'perspective'
+  gardenId: string
   frame: Frame
   nonce: number
   halfSizeM: number
@@ -143,19 +151,24 @@ function CameraRig({
   const top = mode === 'dessus'
   const touched = useRef(false)
   const applied = useRef({ token: '', w: 0, h: 0 })
-  const token = `${mode}|${frame.key}|${nonce}`
+  // La caméra ne se recadre que si ce jeton change : « Recentrer », autre jardin, autre mode.
+  // L'emprise (frame.key) n'en fait pas partie : une plante qui sort des bornes ne doit pas faire perdre sa vue à l'utilisateur.
+  const token = viewResetToken({ mode, gardenId, nonce })
 
   // Cadrage calculé sur l'emprise de la parcelle et la zone visible du canvas.
+  // Recalculé quand l'emprise ou la taille change (il fixe aussi les limites de zoom), mais sans déplacer la caméra.
   const fit = useMemo(() => {
     const insets = getInsets()
     return top
       ? { ortho: fitOrtho(frame.bounds, size.width, size.height, insets), persp: null }
       : { ortho: null, persp: fitPerspective(frame.bounds, size.width, size.height, insets, { groundY: centerY }) }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [top, frame.key, nonce, size.width, size.height, centerY, getInsets])
-  // Valeurs de départ des caméras : figées tant que le cadrage ne change pas (un redimensionnement ne réinitialise pas le zoom de l'utilisateur).
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  const init = useMemo(() => fit, [top, frame.key, nonce])
+    // frame.key résume frame.bounds (l'objet, lui, change à chaque liste de plantes). `nonce` force un
+    // nouveau calcul sur « Recentrer », avec les bandeaux d'interface tels qu'ils sont à ce moment.
+  }, [top, frame.key, size.width, size.height, centerY, getInsets, nonce])
+  // Valeurs de départ des caméras : figées tant que le jeton ne change pas (ni zoom ni position réinitialisés).
+  const initRef = useRef<{ token: string; fit: typeof fit } | null>(null)
+  if (!initRef.current || initRef.current.token !== token) initRef.current = { token, fit }
+  const init = initRef.current.fit
 
   // (Re)cadrage : à l'ouverture, au changement de mode ou de parcelle, et sur « Recentrer ».
   // Tant que l'utilisateur n'a pas touché à la vue, un redimensionnement du canvas recadre aussi.
@@ -274,6 +287,8 @@ export function Scene(props: SceneProps) {
     mode,
     frame,
     fitNonce,
+    gotoNonce,
+    onWalkLimit,
     getInsets,
     walkShared,
     reducedMotion,
@@ -292,10 +307,13 @@ export function Scene(props: SceneProps) {
   cb.current = props
 
   const sample = useMemo(() => makeHeightSampler(garden.terrain), [garden.terrain])
-  const groundRef = useRef<THREE.Mesh>(null)
+  const plantsRef = useRef<PlantsHandle>(null)
+  /** Groupe de la plante sélectionnée (anneau + étiquette) : suit la plante pendant un glisser. */
+  const selRef = useRef<THREE.Group>(null)
 
   const [hoverId, setHoverId] = useState<string | undefined>()
-  const [drag, setDrag] = useState<{ id: string; position: XY } | null>(null)
+  // Incrémenté après un glisser validé : reconstruit les instances depuis les données (remet tout en cohérence).
+  const [rebuild, setRebuild] = useState(0)
   // Niveaux de détail des plantes proches du promeneur (calculés par WalkRig).
   const [lod, setLod] = useState<Record<string, DetailLevel>>({})
   useEffect(() => {
@@ -311,18 +329,19 @@ export function Scene(props: SceneProps) {
         at: new Date(growthTime),
         month,
         sample,
-        override: drag ?? undefined,
         lod: walking ? lod : undefined,
       }),
-    [plants, speciesById, growthTime, month, sample, drag, lod, walking],
+    // `rebuild` n'est pas lu : il force un nouveau calcul après un glisser (voir plus haut).
+    [plants, speciesById, growthTime, month, sample, lod, walking, rebuild],
   )
+  const visualsRef = useRef(visuals)
+  visualsRef.current = visuals
+  const sampleRef = useRef(sample)
+  sampleRef.current = sample
   const centerY = useMemo(() => sample((frame.bounds.minX + frame.bounds.maxX) / 2, (frame.bounds.minY + frame.bounds.maxY) / 2), [sample, frame.bounds])
 
-  // ----- Sol sous le pointeur (raycast sur le maillage du sol, repli sur le plan y = 0) -----
-  const picker = useMemo(
-    () => ({ rc: new THREE.Raycaster(), ndc: new THREE.Vector2(), plane: new THREE.Plane(new THREE.Vector3(0, 1, 0), 0), v: new THREE.Vector3() }),
-    [],
-  )
+  // ----- Sol sous le pointeur pendant un glisser : calcul (plan + relief), sans raycast sur le maillage -----
+  const picker = useMemo(() => ({ rc: new THREE.Raycaster(), ndc: new THREE.Vector2() }), [])
   const clampXY = useCallback(
     (p: XY): XY => ({
       x: Math.max(-halfSizeM, Math.min(halfSizeM, p.x)),
@@ -331,19 +350,14 @@ export function Scene(props: SceneProps) {
     [halfSizeM],
   )
   const groundAt = useCallback(
-    (clientX: number, clientY: number): XY | null => {
+    (clientX: number, clientY: number, startHeight: number): XY | null => {
       const { camera, gl: renderer } = get()
       const rect = renderer.domElement.getBoundingClientRect()
       if (!rect.width || !rect.height) return null
       picker.ndc.set(((clientX - rect.left) / rect.width) * 2 - 1, -((clientY - rect.top) / rect.height) * 2 + 1)
       picker.rc.setFromCamera(picker.ndc, camera)
-      const g = groundRef.current
-      if (g) {
-        const hit = picker.rc.intersectObject(g, false)[0]
-        if (hit) return clampXY({ x: hit.point.x, y: -hit.point.z })
-      }
-      if (picker.rc.ray.intersectPlane(picker.plane, picker.v)) return clampXY({ x: picker.v.x, y: -picker.v.z })
-      return null
+      const p = groundPointOnRay(picker.rc.ray.origin, picker.rc.ray.direction, sampleRef.current, startHeight)
+      return p ? clampXY(p) : null
     },
     [get, picker, clampXY],
   )
@@ -363,26 +377,40 @@ export function Scene(props: SceneProps) {
   const startDrag = useCallback(
     (id: string, ne: PointerEvent) => {
       dragCleanup.current?.()
+      const v0 = visualsRef.current[id]
+      if (!v0) return
+      const origin = v0.base
       const start = { x: ne.clientX, y: ne.clientY }
       let moved = false
       let last: XY | null = null
       setControlsEnabled(false)
+      /** Pendant le glisser, seules les matrices de cette plante (et son anneau) bougent : rien n'est reconstruit. */
+      const place = (x: number, h: number, z: number) => {
+        plantsRef.current?.offsetOwner(id, x - origin[0], h - origin[1], z - origin[2])
+        if (cb.current.selectedPlantId === id) selRef.current?.position.set(x, h, z)
+        invalidate()
+      }
       const move = (ev: PointerEvent) => {
         if (ev.pointerId !== ne.pointerId) return
         if (!moved && Math.hypot(ev.clientX - start.x, ev.clientY - start.y) < DRAG_THRESHOLD_PX) return
         moved = true
         gl.domElement.style.cursor = 'grabbing'
-        const p = groundAt(ev.clientX, ev.clientY)
+        const p = groundAt(ev.clientX, ev.clientY, origin[1])
         if (p) {
           last = p
-          setDrag({ id, position: p })
+          place(p.x, sampleRef.current(p.x, p.y), -p.y)
         }
       }
       const finish = (commit: boolean) => (ev: PointerEvent) => {
         if (ev.pointerId !== ne.pointerId) return
         cleanup()
-        if (commit && moved && last) cb.current.onMovePlant(id, last)
-        setDrag(null)
+        if (commit && moved && last) {
+          cb.current.onMovePlant(id, last)
+          // Une fois la donnée à jour, on reconstruit une fois : cohérence garantie même si l'appelant a refusé le déplacement.
+          window.setTimeout(() => setRebuild((n) => n + 1), 60)
+        } else if (moved) {
+          place(origin[0], origin[1], origin[2]) // annulé : la plante revient où elle était
+        }
       }
       const up = finish(true)
       const cancel = finish(false)
@@ -399,7 +427,7 @@ export function Scene(props: SceneProps) {
       window.addEventListener('pointercancel', cancel)
       dragCleanup.current = cleanup
     },
-    [gl, groundAt, setControlsEnabled],
+    [gl, groundAt, setControlsEnabled, invalidate],
   )
 
   const handlers = useMemo<PlantPointerHandlers>(
@@ -475,14 +503,17 @@ export function Scene(props: SceneProps) {
           sample={sample}
           visuals={visuals}
           selectedPlantId={selectedPlantId}
-          resetToken={`${frame.key}|${fitNonce}`}
+          resetToken={walkResetToken({ gardenId: garden.id, nonce: fitNonce })}
+          gotoToken={gotoNonce}
           halfSizeM={halfSizeM}
           compassRef={compassRef}
           onLod={setLod}
+          onLimit={onWalkLimit}
         />
       ) : (
         <CameraRig
           mode={mode as 'dessus' | 'perspective'}
+          gardenId={garden.id}
           frame={frame}
           nonce={fitNonce}
           halfSizeM={halfSizeM}
@@ -494,46 +525,43 @@ export function Scene(props: SceneProps) {
       )}
 
       <Ground
-        ref={groundRef}
         center={garden.center}
         terrain={garden.terrain}
         halfSizeM={halfSizeM}
         px={orthoPixels(halfSizeM)}
         walking={walking}
         sample={sample}
-        onPointerMove={moveGhost}
+        onPointerMove={placingSpeciesId ? moveGhost : undefined}
         onClick={onGroundClick}
       />
       {showHeatmap && sunHeatmap && <HeatmapLayer map={sunHeatmap} sample={sample} />}
       {garden.parcel && garden.parcel.length > 2 && <ParcelOutline ring={garden.parcel} sample={sample} />}
       {garden.buildings && garden.buildings.length > 0 && <Buildings buildings={garden.buildings} sample={sample} />}
 
-      <Plants parts={parts} handlers={handlers} />
+      <Plants ref={plantsRef} parts={parts} handlers={handlers} />
 
+      {/* Anneau et étiquette de la plante sélectionnée : un groupe qu'on déplace tel quel pendant un glisser. */}
       {selected && (
-        <mesh
-          position={[selected.base[0], selected.base[1] + 0.05, selected.base[2]]}
-          rotation-x={-Math.PI / 2}
-          scale={Math.max(0.3, selected.spreadM / 2 + 0.2)}
-          renderOrder={5}
-        >
-          <ringGeometry args={[0.86, 1, 48]} />
-          <meshBasicMaterial color="#ffd84d" transparent opacity={0.95} depthTest={false} toneMapped={false} />
-        </mesh>
+        <group ref={selRef} position={selected.base}>
+          <mesh position-y={0.05} rotation-x={-Math.PI / 2} scale={Math.max(0.3, selected.spreadM / 2 + 0.2)} renderOrder={5}>
+            <ringGeometry args={[0.86, 1, 48]} />
+            <meshBasicMaterial color="#ffd84d" transparent opacity={0.95} depthTest={false} toneMapped={false} />
+          </mesh>
+          <Html position={[0, walking ? Math.min(selected.heightM + 0.35, 2.5) : selected.heightM + 0.35, 0]} center zIndexRange={[5, 0]} style={{ pointerEvents: 'none' }}>
+            <div className="g3d-label g3d-label--selected">{selected.label}</div>
+          </Html>
+        </group>
       )}
-      {[selected, hovered].map(
-        (v) =>
-          v && (
-            <Html
-              key={v.id}
-              position={[v.base[0], v.base[1] + (walking ? Math.min(v.heightM + 0.35, 2.5) : v.heightM + 0.35), v.base[2]]}
-              center
-              zIndexRange={[5, 0]}
-              style={{ pointerEvents: 'none' }}
-            >
-              <div className={'g3d-label' + (v === selected ? ' g3d-label--selected' : '')}>{v.label}</div>
-            </Html>
-          ),
+      {hovered && (
+        <Html
+          key={hovered.id}
+          position={[hovered.base[0], hovered.base[1] + (walking ? Math.min(hovered.heightM + 0.35, 2.5) : hovered.heightM + 0.35), hovered.base[2]]}
+          center
+          zIndexRange={[5, 0]}
+          style={{ pointerEvents: 'none' }}
+        >
+          <div className="g3d-label">{hovered.label}</div>
+        </Html>
       )}
 
       <group ref={ghostRef} visible={false}>

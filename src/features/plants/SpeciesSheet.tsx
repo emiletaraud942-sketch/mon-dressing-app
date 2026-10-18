@@ -27,7 +27,7 @@ function SpeciesLinks({ ids }: { ids: string[] }) {
     <span className="row" style={{ gap: 4, display: 'inline-flex' }}>
       {ids.map((id) =>
         SPECIES_BY_ID[id] ? (
-          <button key={id} className="btn small ghost" style={{ minHeight: 26, padding: '0 6px' }} onClick={() => openSpecies(id)}>
+          <button key={id} className="btn small ghost" onClick={() => openSpecies(id)}>
             {SPECIES_BY_ID[id].nomCommun}
           </button>
         ) : null,
