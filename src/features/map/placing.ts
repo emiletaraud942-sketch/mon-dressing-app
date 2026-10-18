@@ -38,7 +38,7 @@ export function placePlant(garden: Garden, speciesId: string, position: XY, stat
   setUi({ placingSpeciesId: undefined, placingCustomName: undefined, pendingPhotos: undefined, selectedPlantId: id, ...(opts.tab ? { tab: opts.tab } : {}) })
   if (status === 'projet') {
     showToast({
-      message: `${name} ajouté en projet : pas encore planté.`,
+      message: `Ajoutée en projet : ${name}.`,
       actionLabel: 'Marquer comme plantée',
       onAction: () => updatePlant(id, { status: 'en-place' }),
       durationMs: 10000,

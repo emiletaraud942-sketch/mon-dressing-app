@@ -867,8 +867,13 @@ label.field > span {
   .map-toolbar .short {
     display: inline;
   }
+  .map-toolbar {
+    gap: 3px;
+    padding: 3px;
+  }
   .map-toolbar .btn.small {
-    padding: 4px 8px;
+    padding: 4px 6px;
+    font-size: 0.8rem;
   }
 }
 .map-top .legend {
@@ -1219,4 +1224,9 @@ dialog.modal::backdrop {
 }
 .error-screen .card {
   text-align: center;
+  color: var(--text);
+}
+.error-screen .card .muted,
+.error-screen .card p {
+  color: var(--muted);
 }

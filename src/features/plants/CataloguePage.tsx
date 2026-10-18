@@ -65,16 +65,16 @@ export function CataloguePage({ garden }: { garden: Garden }) {
         <input
           className="input"
           type="search"
-          style={{ flex: 2, minWidth: 180 }}
+          style={{ flex: '2 1 220px' }}
           aria-label="Rechercher une espèce"
-          placeholder="Rechercher (pommier, Malus, tomate…)"
+          placeholder="Pommier, Malus, tomate…"
           value={q}
           onChange={(e) => {
             setQ(e.target.value)
             if (mobile) setListOpen(true)
           }}
         />
-        <select className="input" style={{ flex: 1, minWidth: 140 }} value={cat} onChange={(e) => setCat(e.target.value as Category | '')} aria-label="Catégorie">
+        <select className="input" style={{ flex: '1 1 160px' }} value={cat} onChange={(e) => setCat(e.target.value as Category | '')} aria-label="Catégorie">
           <option value="">Toutes les catégories</option>
           {Object.entries(CATEGORY_LABEL).map(([k, v]) => (
             <option key={k} value={k}>

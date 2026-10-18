@@ -145,7 +145,7 @@ function ImportDialog({ pending, onClose, onDone }: { pending: PendingImport; on
       )}
       {hasPhotos && <p className="alert small">Les photos ne sont pas dans la sauvegarde : celles de vos plantes actuelles seront supprimées de cet appareil.</p>}
       {hasCurrent && (
-        <label className="row" style={{ gap: 10, margin: '12px 0', minHeight: 40 }}>
+        <label className="row" style={{ gap: 10, margin: "12px 0", minHeight: 40, flexWrap: "nowrap" }}>
           <input type="checkbox" className="check" checked={backup} onChange={(e) => setBackup(e.target.checked)} />
           <span>Télécharger d'abord une copie de mes données actuelles</span>
         </label>
