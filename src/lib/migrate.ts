@@ -3,6 +3,8 @@
 import type { Building, Garden, Plant, PlantStatus, SoilTexture, TaskDone, TerrainGrid, XY } from '../types'
 import { isoDate } from './dates'
 import { uid } from './geo'
+import { LIMITS } from './security/limits'
+import { cleanExtras, clipText, isPhotoId, isSafeId } from './security/sanitize'
 
 /** Version du format stocké. Toute évolution incompatible = +1 et une étape dans `migrateState`. */
 export const STATE_VERSION = 2
@@ -28,7 +30,14 @@ const DAY_MS = 86_400_000
 type Rec = Record<string, unknown>
 const isRec = (v: unknown): v is Rec => typeof v === 'object' && v !== null && !Array.isArray(v)
 const isNum = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v)
-const isId = (v: unknown): v is string => typeof v === 'string' && v.trim() !== ''
+const isId = (v: unknown): v is string => isSafeId(v)
+const inRange = (n: number, max: number) => Math.abs(n) <= max
+/** Texte raccourci à `max` caractères (les données importées ne sont pas dignes de confiance). */
+const text = (v: string, max: number = LIMITS.shortText) => clipText(v, max)
+
+const GARDEN_KEYS: ReadonlySet<string> = new Set(['id', 'name', 'address', 'center', 'altitudeM', 'parcel', 'parcelRefs', 'areaM2', 'buildings', 'terrain', 'sol', 'lastFrostDoy', 'firstFrostDoy', 'createdAt'])
+const PLANT_KEYS: ReadonlySet<string> = new Set(['id', 'gardenId', 'speciesId', 'customName', 'position', 'plantedAt', 'ageAtPlanting', 'status', 'notes', 'photos'])
+const TASK_KEYS: ReadonlySet<string> = new Set(['id', 'gardenId', 'taskKey', 'doneAt'])
 
 /** Date ISO plausible : « 2024-03-10 » ou date-heure complète. Rejette « 2024-13-45 ». */
 function isValidDate(v: unknown): v is string {
@@ -42,17 +51,17 @@ function isValidDate(v: unknown): v is string {
 }
 
 function validXY(v: unknown): v is XY {
-  return isRec(v) && isNum(v.x) && isNum(v.y)
+  return isRec(v) && isNum(v.x) && isNum(v.y) && inRange(v.x, LIMITS.coordM) && inRange(v.y, LIMITS.coordM)
 }
 
 /** Anneau d'au moins 3 points tous valides, sinon undefined. */
 function validRing(v: unknown): XY[] | undefined {
-  if (!Array.isArray(v) || v.length < 3 || !v.every(validXY)) return undefined
+  if (!Array.isArray(v) || v.length < 3 || v.length > LIMITS.ringPoints || !v.every(validXY)) return undefined
   return v.map((p) => ({ x: p.x, y: p.y }))
 }
 
 function validTerrain(v: unknown): TerrainGrid | undefined {
-  if (!isRec(v) || !isNum(v.size) || v.size <= 0 || !isNum(v.n) || !Number.isInteger(v.n) || v.n < 2) return undefined
+  if (!isRec(v) || !isNum(v.size) || v.size <= 0 || v.size > LIMITS.terrainSizeM || !isNum(v.n) || !Number.isInteger(v.n) || v.n < 2 || v.n > LIMITS.terrainN) return undefined
   if (!Array.isArray(v.heights) || v.heights.length !== v.n * v.n || !v.heights.every(isNum)) return undefined
   return { size: v.size, n: v.n, heights: v.heights as number[] }
 }
@@ -62,12 +71,12 @@ class Report {
   private counts = new Map<string, number>()
   private templates = new Map<string, [string, string]>()
   private order: string[] = []
-  add(id: string, one: string, many: string) {
+  add(id: string, one: string, many: string, n = 1) {
     if (!this.templates.has(id)) {
       this.templates.set(id, [one, many])
       this.order.push(id)
     }
-    this.counts.set(id, (this.counts.get(id) ?? 0) + 1)
+    this.counts.set(id, (this.counts.get(id) ?? 0) + n)
   }
   toList(): string[] {
     return this.order.map((id) => {
@@ -91,22 +100,24 @@ function sanitizeGarden(raw: unknown, report: Report): Garden | undefined {
   }
   const center = c as { lon: number; lat: number }
   const g: Garden = {
-    ...(raw as unknown as Garden),
+    ...(cleanExtras(raw, GARDEN_KEYS) as unknown as Partial<Garden>),
     id: raw.id,
-    name: typeof raw.name === 'string' && raw.name.trim() ? raw.name : 'Mon jardin',
-    address: typeof raw.address === 'string' ? raw.address : '',
+    name: typeof raw.name === 'string' && raw.name.trim() ? text(raw.name) : 'Mon jardin',
+    address: typeof raw.address === 'string' ? text(raw.address) : '',
     center: { lon: center.lon, lat: center.lat },
     createdAt: isValidDate(raw.createdAt) ? raw.createdAt : new Date().toISOString(),
   }
 
-  if (g.altitudeM !== undefined && !isNum(g.altitudeM)) delete g.altitudeM
-  if (g.areaM2 !== undefined && !isNum(g.areaM2)) delete g.areaM2
-  if (g.lastFrostDoy !== undefined && !isNum(g.lastFrostDoy)) delete g.lastFrostDoy
-  if (g.firstFrostDoy !== undefined && !isNum(g.firstFrostDoy)) delete g.firstFrostDoy
-  if (g.sol !== undefined && !SOILS.has(g.sol)) delete g.sol
-  if (g.parcelRefs !== undefined) {
-    if (Array.isArray(g.parcelRefs)) g.parcelRefs = g.parcelRefs.filter((r) => typeof r === 'string')
-    else delete g.parcelRefs
+  if (isNum(raw.altitudeM) && inRange(raw.altitudeM, 10_000)) g.altitudeM = raw.altitudeM
+  if (isNum(raw.areaM2) && raw.areaM2 >= 0 && raw.areaM2 <= 1e10) g.areaM2 = raw.areaM2
+  if (isNum(raw.lastFrostDoy)) g.lastFrostDoy = raw.lastFrostDoy
+  if (isNum(raw.firstFrostDoy)) g.firstFrostDoy = raw.firstFrostDoy
+  if (typeof raw.sol === 'string' && SOILS.has(raw.sol)) g.sol = raw.sol as SoilTexture
+  if (Array.isArray(raw.parcelRefs)) {
+    g.parcelRefs = raw.parcelRefs
+      .filter((r): r is string => typeof r === 'string')
+      .slice(0, LIMITS.parcelRefs)
+      .map((r) => text(r, LIMITS.parcelRefLength))
   }
 
   if (raw.parcel !== undefined) {
@@ -124,9 +135,10 @@ function sanitizeGarden(raw: unknown, report: Report): Garden | undefined {
       report.add('bati', '{n} bâtiment invalide a été retiré.', '{n} bâtiments invalides ont été retirés.')
     } else {
       const kept: Building[] = []
-      for (const b of raw.buildings) {
+      if (raw.buildings.length > LIMITS.buildingsPerGarden) report.add('bati-max', 'Des bâtiments en trop ont été ignorés dans {n} jardin.', 'Des bâtiments en trop ont été ignorés dans {n} jardins.')
+      for (const b of raw.buildings.slice(0, LIMITS.buildingsPerGarden)) {
         const ring = isRec(b) ? validRing(b.ring) : undefined
-        if (isRec(b) && isId(b.id) && ring && isNum(b.heightM) && b.heightM >= 0) kept.push({ id: b.id, ring, heightM: b.heightM })
+        if (isRec(b) && isId(b.id) && ring && isNum(b.heightM) && b.heightM >= 0 && b.heightM <= 1000) kept.push({ id: b.id, ring, heightM: b.heightM })
         else report.add('bati', '{n} bâtiment invalide a été retiré.', '{n} bâtiments invalides ont été retirés.')
       }
       g.buildings = kept
@@ -157,19 +169,23 @@ function sanitizePlant(raw: unknown, gardenIds: Set<string>, report: Report): Pl
     report.add('p-pos', '{n} plante sans position a été ignorée.', '{n} plantes sans position ont été ignorées.')
     return undefined
   }
-  if (!isId(raw.speciesId)) {
+  if (!isSafeId(raw.speciesId)) {
     report.add('p-espece', '{n} plante sans espèce a été ignorée.', '{n} plantes sans espèce ont été ignorées.')
     return undefined
   }
+  const photos = Array.isArray(raw.photos) ? raw.photos.filter(isPhotoId).slice(0, LIMITS.photosPerPlant) : []
+  if (Array.isArray(raw.photos) && photos.length !== raw.photos.length) {
+    report.add('p-photos', "{n} plante avait une référence de photo invalide : elle a été retirée.", "{n} plantes avaient une référence de photo invalide : elle a été retirée.")
+  }
   const p: Plant = {
-    ...(raw as unknown as Plant),
+    ...(cleanExtras(raw, PLANT_KEYS) as unknown as Partial<Plant>),
     id: raw.id,
     gardenId: raw.gardenId,
     speciesId: raw.speciesId,
     position: { x: raw.position.x, y: raw.position.y },
     plantedAt: raw.plantedAt as string,
     status: raw.status as PlantStatus,
-    photos: Array.isArray(raw.photos) ? raw.photos.filter((x): x is string => typeof x === 'string') : [],
+    photos,
   }
   if (!isValidDate(raw.plantedAt)) {
     p.plantedAt = isoDate()
@@ -179,16 +195,28 @@ function sanitizePlant(raw: unknown, gardenIds: Set<string>, report: Report): Pl
     p.status = 'en-place'
     report.add('p-statut', '{n} plante avec un statut inconnu a été remise « en place ».', '{n} plantes avec un statut inconnu ont été remises « en place ».')
   }
-  if (p.ageAtPlanting !== undefined && !(isNum(p.ageAtPlanting) && p.ageAtPlanting >= 0)) delete p.ageAtPlanting
-  if (p.notes !== undefined && typeof p.notes !== 'string') delete p.notes
-  if (p.customName !== undefined && typeof p.customName !== 'string') delete p.customName
+  if (isNum(raw.ageAtPlanting) && raw.ageAtPlanting >= 0 && raw.ageAtPlanting <= 1000) p.ageAtPlanting = raw.ageAtPlanting
+  if (typeof raw.notes === 'string') p.notes = text(raw.notes, LIMITS.longText)
+  if (typeof raw.customName === 'string') p.customName = text(raw.customName)
   return p
 }
 
 function sanitizeTaskDone(raw: unknown, gardenIds: Set<string>): TaskDone | undefined {
-  if (!isRec(raw) || !isId(raw.taskKey) || !isValidDate(raw.doneAt)) return undefined
+  if (!isRec(raw) || !isSafeId(raw.taskKey, LIMITS.taskKeyLength) || !isValidDate(raw.doneAt)) return undefined
   if (raw.gardenId !== undefined && raw.gardenId !== '' && !(isId(raw.gardenId) && gardenIds.has(raw.gardenId))) return undefined
-  return { ...(raw as unknown as TaskDone), id: isId(raw.id) ? raw.id : uid(), taskKey: raw.taskKey, doneAt: raw.doneAt }
+  const extras = cleanExtras(raw, TASK_KEYS) as unknown as Partial<TaskDone>
+  const done: TaskDone = { ...extras, id: isId(raw.id) ? raw.id : uid(), gardenId: raw.gardenId as string, taskKey: raw.taskKey, doneAt: raw.doneAt }
+  if (raw.gardenId === undefined) delete (done as Partial<TaskDone>).gardenId
+  return done
+}
+
+/** Tableau brut plafonné à `max` éléments (les premiers, ou les derniers si `fromEnd`) ; signale ce qui est ignoré. */
+function capped(list: unknown, max: number, report: Report, id: string, one: string, many: string, fromEnd = false): unknown[] {
+  if (!Array.isArray(list)) return []
+  if (list.length <= max) return list
+  const extra = list.length - max
+  report.add(id, one.replace('{max}', String(max)), many.replace('{max}', String(max)), extra)
+  return fromEnd ? list.slice(extra) : list.slice(0, max)
 }
 
 /** Retire les doublons d'id (le premier gagne). */
@@ -220,7 +248,7 @@ export function migrateState(raw: unknown): MigrateResult {
   const report = new Report()
   // v1 (sans `version`) → v2 : même forme ; v2 ajoute seulement `version` et la validation.
   const gardens = dedupe(
-    (Array.isArray(raw.gardens) ? raw.gardens : []).map((g) => sanitizeGarden(g, report)).filter((g): g is Garden => !!g),
+    capped(raw.gardens, LIMITS.gardens, report, 'g-max', 'Seuls les {max} premiers jardins ont été gardés ; {n} jardin en trop a été ignoré.', 'Seuls les {max} premiers jardins ont été gardés ; {n} jardins en trop ont été ignorés.').map((g) => sanitizeGarden(g, report)).filter((g): g is Garden => !!g),
     report,
     'g-doublon',
     '{n} jardin en double a été ignoré.',
@@ -229,14 +257,14 @@ export function migrateState(raw: unknown): MigrateResult {
   const gardenIds = new Set(gardens.map((g) => g.id))
 
   const plants = dedupe(
-    (Array.isArray(raw.plants) ? raw.plants : []).map((p) => sanitizePlant(p, gardenIds, report)).filter((p): p is Plant => !!p),
+    capped(raw.plants, LIMITS.plants, report, 'p-max', 'Seules les {max} premières plantes ont été gardées ; {n} plante en trop a été ignorée.', 'Seules les {max} premières plantes ont été gardées ; {n} plantes en trop ont été ignorées.').map((p) => sanitizePlant(p, gardenIds, report)).filter((p): p is Plant => !!p),
     report,
     'p-doublon',
     '{n} plante en double a été ignorée.',
     '{n} plantes en double ont été ignorées.',
   )
 
-  const rawDone = Array.isArray(raw.tasksDone) ? raw.tasksDone : []
+  const rawDone = capped(raw.tasksDone, LIMITS.tasksDone, report, 't-max', 'Seules les {max} dernières tâches faites ont été gardées ; {n} tâche en trop a été ignorée.', 'Seules les {max} dernières tâches faites ont été gardées ; {n} tâches en trop ont été ignorées.', true)
   const done = rawDone.map((t) => sanitizeTaskDone(t, gardenIds)).filter((t): t is TaskDone => !!t)
   const tasksDone = dedupe(done, report, 't-doublon', '{n} tâche faite en double a été ignorée.', '{n} tâches faites en double ont été ignorées.')
 

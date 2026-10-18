@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { SPECIES_BY_ID } from '../../data/species'
 import type { Plant } from '../../types'
-import { buildPlantScene, PART_KINDS, partGeometries } from './plantModel'
+import { buildPlantScene, disposePartGeometries, PART_KINDS, partGeometries } from './plantModel'
 import { flatSampler } from './terrain'
 import type { DetailLevel } from './walk'
 
@@ -51,5 +51,21 @@ describe('modèle des plantes', () => {
   })
   it('géométries mémoïsées', () => {
     expect(partGeometries()).toBe(partGeometries())
+  })
+})
+
+describe('ressources partagées', () => {
+  it('disposePartGeometries libère les géométries (événement dispose) et elles sont recréées à la demande', () => {
+    const first = partGeometries()
+    expect(partGeometries()).toBe(first) // mémoïsées tant qu'on ne libère pas
+    let disposed = 0
+    for (const k of PART_KINDS) first[k].addEventListener('dispose', () => disposed++)
+    disposePartGeometries()
+    expect(disposed).toBe(PART_KINDS.length)
+    const second = partGeometries()
+    expect(second).not.toBe(first)
+    expect(second.blob.attributes.position.count).toBeGreaterThan(0)
+    disposePartGeometries()
+    disposePartGeometries() // sans effet quand tout est déjà libéré
   })
 })

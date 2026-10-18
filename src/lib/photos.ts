@@ -1,5 +1,8 @@
 import { del, get, keys, set } from 'idb-keyval'
 import { uid } from './geo'
+import { imageSize, sizeWithinLimits } from './security/image'
+import { LIMITS } from './security/limits'
+import { isPhotoId } from './security/sanitize'
 
 export const PHOTO_PREFIX = 'photo:'
 /** Cible par image : 5 photos en base64 (×1,37) doivent tenir sous les 4,5 Mo d'une fonction Vercel. */
@@ -7,6 +10,23 @@ export const TARGET_BYTES = 700 * 1024
 const MAX_SIDE = 1280
 const MIN_SIDE = 480
 const MESSAGE_FORMAT = 'Format de photo non pris en charge. Utilisez une photo JPEG ou PNG.'
+const MESSAGE_TOO_BIG = 'Cette photo est trop grande pour être traitée sur cet appareil. Utilisez une photo de plus petite taille.'
+
+/**
+ * Refuse, avant tout décodage, un fichier démesuré ou dont l'en-tête annonce des dimensions absurdes
+ * (une « bombe de décompression » : petit fichier PNG de 30 000 × 30 000 px qui saturerait la mémoire).
+ */
+async function assertDecodable(file: Blob): Promise<void> {
+  if (file.size > LIMITS.photoInputBytes) throw new Error(MESSAGE_TOO_BIG)
+  let head: Uint8Array
+  try {
+    head = new Uint8Array(await file.slice(0, 262_144).arrayBuffer())
+  } catch {
+    return // lecture impossible : createImageBitmap tranchera
+  }
+  const size = imageSize(head)
+  if (size && !sizeWithinLimits(size, LIMITS.photoMaxSide, LIMITS.photoMaxPixels)) throw new Error(MESSAGE_TOO_BIG)
+}
 
 function toBlob(canvas: HTMLCanvasElement, type: string, quality: number): Promise<Blob> {
   return new Promise((resolve, reject) =>
@@ -15,12 +35,19 @@ function toBlob(canvas: HTMLCanvasElement, type: string, quality: number): Promi
 }
 
 async function decode(file: Blob): Promise<ImageBitmap> {
+  await assertDecodable(file)
+  let bitmap: ImageBitmap
   try {
-    return await createImageBitmap(file)
+    bitmap = await createImageBitmap(file)
   } catch {
     // HEIC/HEIF, fichier corrompu, type non image…
     throw new Error(MESSAGE_FORMAT)
   }
+  if (!sizeWithinLimits(bitmap, LIMITS.photoMaxSide, LIMITS.photoMaxPixels)) {
+    bitmap.close?.()
+    throw new Error(MESSAGE_TOO_BIG)
+  }
+  return bitmap
 }
 
 /**
@@ -55,7 +82,11 @@ export async function compressToTarget(file: Blob, opts: { maxSide?: number; tar
   }
 }
 
-/** Réduit une photo (max 1280 px, < 700 ko) et la stocke dans IndexedDB. Renvoie son id. */
+/**
+ * Réduit une photo (max 1280 px, < 700 ko) et la stocke dans IndexedDB. Renvoie son id.
+ * Vie privée : la photo est redessinée sur un canvas puis ré-encodée en JPEG, ce qui supprime EXIF, GPS, XMP et miniature
+ * (prouvé par un test navigateur, voir docs/SECURITE.md). C'est toujours cette copie qui est stockée et envoyée à Pl@ntNet.
+ */
 export async function savePhoto(file: Blob): Promise<string> {
   const blob = await compressToTarget(file)
   const id = PHOTO_PREFIX + uid()
@@ -63,15 +94,20 @@ export async function savePhoto(file: Blob): Promise<string> {
   return id
 }
 
+/** Lit une photo. Un identifiant qui n'a pas la forme « photo:… » est refusé : on ne lit jamais une autre clé IndexedDB (l'état, la sauvegarde…). */
 export async function getPhoto(id: string): Promise<Blob | undefined> {
-  return get(id)
+  if (!isPhotoId(id)) return undefined
+  const v = await get(id)
+  return v instanceof Blob ? v : undefined
 }
 
+/** Supprime une photo. Identifiant invalide : sans effet (jamais d'effacement d'une autre clé). */
 export async function deletePhoto(id: string) {
+  if (!isPhotoId(id)) return
   await del(id)
 }
 
 /** Ids de toutes les photos stockées (pour le nettoyage des orphelines). */
 export async function listPhotoIds(): Promise<string[]> {
-  return (await keys()).filter((k): k is string => typeof k === 'string' && k.startsWith(PHOTO_PREFIX))
+  return (await keys()).filter((k): k is string => isPhotoId(k))
 }

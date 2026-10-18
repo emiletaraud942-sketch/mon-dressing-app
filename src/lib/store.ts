@@ -1,4 +1,4 @@
-import { get, set } from 'idb-keyval'
+import { del, get, keys, set } from 'idb-keyval'
 import { useMemo, useSyncExternalStore } from 'react'
 import type { Garden, Plant, TaskDone } from '../types'
 import { compactTasksDone, migrateState, STATE_VERSION, type StateData } from './migrate'
@@ -57,6 +57,8 @@ export function getLoadWarnings(): string[] {
 let saveTimer: ReturnType<typeof setTimeout> | undefined
 let dirty = false
 
+let wiping = false
+
 function persist() {
   dirty = true
   if (status.readFailed) return // jamais d'écriture par-dessus des données qu'on n'a pas pu lire
@@ -68,7 +70,7 @@ function persist() {
 export function flush() {
   clearTimeout(saveTimer)
   saveTimer = undefined
-  if (!dirty || !state.loaded || status.readFailed) return
+  if (!dirty || !state.loaded || status.readFailed || wiping) return
   dirty = false
   const data = { version: STATE_VERSION, gardens: state.gardens, plants: state.plants, tasksDone: state.tasksDone, activeGardenId: state.activeGardenId }
   set(KEY, data).then(
@@ -104,7 +106,19 @@ function initLifecycle() {
       ;(channel as unknown as { unref?: () => void }).unref?.()
       // Un autre onglet a écrit : on se met à jour (dernier écrivain gagne), sauf si on a des changements en attente.
       channel.onmessage = (e: MessageEvent) => {
-        if ((e.data as { type?: string } | null)?.type !== 'saved' || dirty || status.readFailed) return
+        const type = (e.data as { type?: string } | null)?.type
+        if (type === 'erased') {
+          // Un autre onglet a effacé toutes les données : on vide aussi la mémoire de celui-ci, sinon sa prochaine
+          // modification réécrirait l'ancien état dans IndexedDB.
+          clearTimeout(saveTimer)
+          saveTimer = undefined
+          dirty = false
+          loadWarnings = []
+          state = { gardens: [], plants: [], tasksDone: [], activeGardenId: undefined, loaded: true }
+          emit()
+          return
+        }
+        if (type !== 'saved' || dirty || status.readFailed) return
         void reloadFromStorage()
       }
     } catch {
@@ -188,6 +202,29 @@ export async function loadState() {
     emit()
   }
   void purgeOrphanPhotos()
+}
+
+/**
+ * Efface TOUT ce que l'appli garde dans IndexedDB (état, copie « avant migration », photos) et vide la mémoire.
+ * Les autres onglets sont prévenus. Lève une erreur si le stockage refuse la suppression.
+ * Pour tout effacer (localStorage, caches, compte en ligne), utiliser `eraseAllData()` de `lib/security/erase.ts`.
+ */
+export async function wipeLocalData(): Promise<void> {
+  wiping = true
+  try {
+    clearTimeout(saveTimer)
+    saveTimer = undefined
+    dirty = false
+    loadWarnings = []
+    state = { gardens: [], plants: [], tasksDone: [], activeGardenId: undefined, loaded: true }
+    setStatus({ readFailed: false, writeError: undefined })
+    emit()
+    for (const k of await keys()) await del(k)
+    channel?.postMessage({ type: 'erased' })
+  } finally {
+    wiping = false
+    if (dirty) persist() // l'utilisateur a recommencé à saisir pendant l'effacement
+  }
 }
 
 /** Nouvelle tentative de lecture après un échec ; lève le blocage si elle réussit. */

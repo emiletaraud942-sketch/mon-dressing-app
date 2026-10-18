@@ -110,10 +110,16 @@ export async function currentUser(): Promise<User | null> {
   return data.session?.user ?? null
 }
 
+/** Adresse plausible (la vraie validation est faite par Supabase) : évite d'envoyer n'importe quoi au service. */
+export const isPlausibleEmail = (e: string) => e.length <= 254 && /^[^\s@<>"',;]+@[^\s@<>"',;]+\.[^\s@<>"',;]+$/.test(e)
+
 export async function sendMagicLink(email: string) {
   const sb = supabase()
   if (!sb) throw new Error('Synchronisation non configurée')
-  const { error } = await withTimeout(sb.auth.signInWithOtp({ email, options: { emailRedirectTo: location.origin + '/' } }))
+  const address = email.trim()
+  if (!isPlausibleEmail(address)) throw new Error('Adresse e-mail invalide.')
+  // Le retour se fait toujours sur notre propre origine ; Supabase n'accepte que les « Redirect URLs » de sa liste blanche.
+  const { error } = await withTimeout(sb.auth.signInWithOtp({ email: address, options: { emailRedirectTo: location.origin + '/' } }))
   if (error) throw error
 }
 
@@ -121,6 +127,26 @@ export async function signOut() {
   const sb = supabase()
   if (!sb) return
   await withTimeout(sb.auth.signOut())
+}
+
+/**
+ * Déconnexion LOCALE : efface le jeton stocké par supabase-js sur cet appareil, sans réseau
+ * (donc utilisable même hors ligne, par exemple pour « Effacer toutes mes données »).
+ */
+export async function signOutLocal() {
+  const sb = supabase()
+  if (sb) {
+    try {
+      await withTimeout(sb.auth.signOut({ scope: 'local' }), 5_000)
+    } catch {
+      /* hors ligne : on supprime quand même les jetons ci-dessous */
+    }
+  }
+  try {
+    for (const k of Object.keys(localStorage)) if (/^sb-.*-auth-token/.test(k) || k.startsWith('permajardin:last-synced:')) localStorage.removeItem(k)
+  } catch {
+    /* stockage indisponible */
+  }
 }
 
 // ---------- Instantané ----------
@@ -213,6 +239,32 @@ export async function pushSnapshot(opts: { force?: boolean } = {}) {
   }
   if (result.error) throw dbFailure(result.error)
   writeLastSynced(user.id, result.data?.[0]?.updated_at)
+}
+
+/**
+ * Droit à l'effacement : supprime l'instantané en ligne de l'utilisateur connecté (jardins, plantes, adresse, position).
+ * L'adresse e-mail du compte reste chez Supabase : `deleteMyAccount()` la supprime aussi.
+ */
+export async function deleteRemoteSnapshot(): Promise<void> {
+  const { sb, user } = await requireUser()
+  const { error } = await withTimeout(sb.from(TABLE).delete().eq('user_id', user.id))
+  if (error) throw dbFailure(error)
+  try {
+    localStorage.removeItem(lastSyncKey(user.id))
+  } catch {
+    /* stockage indisponible */
+  }
+}
+
+/**
+ * Supprime le compte (adresse e-mail) ET l'instantané, puis déconnecte cet appareil.
+ * Appelle la fonction SQL `delete_my_account()` (migration 20261019000000) : elle ne peut effacer que le compte de l'appelant.
+ */
+export async function deleteMyAccount(): Promise<void> {
+  const { sb } = await requireUser()
+  const { error } = await withTimeout(sb.rpc('delete_my_account'))
+  if (error) throw dbFailure(error)
+  await signOutLocal()
 }
 
 /** Remplace les données locales par l'instantané en ligne. `false` s'il n'y en a pas. Refuse un instantané invalide. */
