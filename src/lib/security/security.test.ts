@@ -8,6 +8,7 @@ import { DATA_INVENTORY, ERASABLE_CACHE, ERASABLE_LOCAL_KEY, getDataInventory, P
 import { LIMITS } from './limits'
 import { cleanJson, clipText, isPhotoId, isSafeId } from './sanitize'
 import { clearLocalKeys, clearPlaceCaches } from './erase'
+import { imageSize as apiImageSize } from '../../../api/identify'
 
 const garden = { id: 'g1', name: 'Jardin', address: 'Lyon', center: { lon: 4.83, lat: 45.76 }, createdAt: '2025-01-01T00:00:00.000Z' }
 const plant = { id: 'p1', gardenId: 'g1', speciesId: 'pommier', position: { x: 1, y: 2 }, plantedAt: '2024-03-10', status: 'en-place', photos: [] as unknown[] }
@@ -205,6 +206,18 @@ describe('image : en-têtes et métadonnées', () => {
     vp8x.set(Buffer.from('VP8X'), 12)
     vp8x.set([0x0f, 0x27, 0, 0x9f, 0x0f, 0], 24) // 9999 × 4000
     expect(imageSize(vp8x)).toEqual({ mime: 'image/webp', width: 10000, height: 4000 })
+  })
+  it('la copie de api/identify.ts donne exactement les mêmes dimensions (anti-dérive)', () => {
+    const vp8l = new Uint8Array(30)
+    vp8l.set(Buffer.from('RIFF'), 0)
+    vp8l.set(Buffer.from('WEBP'), 8)
+    vp8l.set(Buffer.from('VP8L'), 12)
+    vp8l[20] = 0x2f
+    vp8l.set([0x7f, 0xc0, 0x0f, 0x00], 21)
+    for (const f of [png(640, 480), png(30000, 1), jpeg(1280, 720, true), jpeg(1, 1), vp8l, Uint8Array.from([0xff, 0xd8, 0xff]), new Uint8Array(), Buffer.from('texte')]) {
+      const a = imageSize(f)
+      expect(apiImageSize(f)).toEqual(a ? { width: a.width, height: a.height } : undefined)
+    }
   })
   it('renvoie undefined pour tronqué, inconnu ou incohérent', () => {
     expect(imageSize(new Uint8Array())).toBeUndefined()

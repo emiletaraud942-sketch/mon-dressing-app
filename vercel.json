@@ -2,20 +2,36 @@
   "framework": "vite",
   "rewrites": [
     {
-      "source": "/ext/geopf/:path*",
-      "destination": "https://data.geopf.fr/:path*"
+      "source": "/ext/geopf/wmts",
+      "destination": "https://data.geopf.fr/wmts"
     },
     {
-      "source": "/ext/apicarto/:path*",
-      "destination": "https://apicarto.ign.fr/:path*"
+      "source": "/ext/geopf/wms-r",
+      "destination": "https://data.geopf.fr/wms-r"
     },
     {
-      "source": "/ext/meteo-archive/:path*",
-      "destination": "https://archive-api.open-meteo.com/:path*"
+      "source": "/ext/geopf/wfs/ows",
+      "destination": "https://data.geopf.fr/wfs/ows"
     },
     {
-      "source": "/ext/meteo/:path*",
-      "destination": "https://api.open-meteo.com/:path*"
+      "source": "/ext/geopf/geocodage/search",
+      "destination": "https://data.geopf.fr/geocodage/search"
+    },
+    {
+      "source": "/ext/geopf/altimetrie/1.0/calcul/alti/rest/elevation.json",
+      "destination": "https://data.geopf.fr/altimetrie/1.0/calcul/alti/rest/elevation.json"
+    },
+    {
+      "source": "/ext/apicarto/api/cadastre/parcelle",
+      "destination": "https://apicarto.ign.fr/api/cadastre/parcelle"
+    },
+    {
+      "source": "/ext/meteo-archive/v1/archive",
+      "destination": "https://archive-api.open-meteo.com/v1/archive"
+    },
+    {
+      "source": "/ext/meteo/v1/forecast",
+      "destination": "https://api.open-meteo.com/v1/forecast"
     },
     {
       "source": "/((?!api/|ext/|assets/|.*\\.).*)",
@@ -36,15 +52,31 @@
         },
         {
           "key": "Permissions-Policy",
-          "value": "camera=(self), geolocation=(self), microphone=()"
+          "value": "accelerometer=(), autoplay=(), bluetooth=(), camera=(self), display-capture=(), encrypted-media=(), geolocation=(self), gyroscope=(), hid=(), magnetometer=(), microphone=(), midi=(), payment=(), publickey-credentials-get=(), screen-wake-lock=(), serial=(), usb=(), xr-spatial-tracking=()"
         },
         {
           "key": "X-Frame-Options",
           "value": "DENY"
         },
         {
+          "key": "Strict-Transport-Security",
+          "value": "max-age=63072000; includeSubDomains"
+        },
+        {
+          "key": "Cross-Origin-Opener-Policy",
+          "value": "same-origin"
+        },
+        {
+          "key": "Cross-Origin-Resource-Policy",
+          "value": "same-origin"
+        },
+        {
+          "key": "X-DNS-Prefetch-Control",
+          "value": "off"
+        },
+        {
           "key": "Content-Security-Policy",
-          "value": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' https://*.supabase.co wss://*.supabase.co; worker-src 'self' blob:; child-src 'self' blob:; manifest-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'"
+          "value": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' https://*.supabase.co wss://*.supabase.co; worker-src 'self' blob:; child-src 'self' blob:; frame-src 'none'; manifest-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'; upgrade-insecure-requests"
         }
       ]
     },

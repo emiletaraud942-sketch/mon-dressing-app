@@ -13,6 +13,7 @@ import { doyToLabel } from '../../lib/weather'
 import type { Garden, SoilTexture } from '../../types'
 import { GardenCreator } from './GardenCreator'
 import { GardenDataBanner } from './GardenDataBanner'
+import { PrivacyCard } from './PrivacyCard'
 import { FAIL_HELP } from './createGarden'
 import { uniqueGardenName } from './gardenName'
 import { describeCounts, importQuestion } from './importSummary'
@@ -432,6 +433,7 @@ export function SettingsPage({ garden }: { garden: Garden }) {
           <Backup />
           <Sync />
           <ThemeCard />
+          <PrivacyCard />
           <div className="card small">
             <h2>Sources et licences</h2>
             <ul className="list">

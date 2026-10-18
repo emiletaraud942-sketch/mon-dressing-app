@@ -1,10 +1,28 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { VercelRequest, VercelResponse } from '@vercel/node'
-import handler, { clientIp, createRateLimiter, detectImageMime, interpretPlantnet, isAllowedOrigin, MAX_BODY_BYTES, scrubError } from '../identify'
+import handler, { clientIp, createRateLimiter, decodeBase64Image, detectImageMime, imageSize, interpretPlantnet, isAllowedOrigin, MAX_BODY_BYTES, scrubError } from '../identify'
 
-const JPEG = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0, 0x10, 0x4a, 0x46])
-const PNG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0])
-const WEBP = Buffer.concat([Buffer.from('RIFF'), Buffer.from([1, 2, 3, 4]), Buffer.from('WEBP'), Buffer.from('VP8 ')])
+/** JPEG minimal avec un segment SOF0 (dimensions déclarées). */
+const jpeg = (w = 640, h = 480) => Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0, 4, 0x4a, 0x46, 0xff, 0xc0, 0, 17, 8, h >> 8, h & 255, w >> 8, w & 255, 3, 1, 0x22, 0, 2, 0x11, 1, 3, 0x11, 1, 0xff, 0xd9])
+const png = (w = 640, h = 480) => {
+  const b = Buffer.alloc(33)
+  Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52]).copy(b)
+  b.writeUInt32BE(w, 16)
+  b.writeUInt32BE(h, 20)
+  return b
+}
+const webp = () => {
+  const b = Buffer.alloc(30)
+  b.write('RIFF', 0)
+  b.write('WEBP', 8)
+  b.write('VP8X', 12)
+  b.writeUIntLE(639, 24, 3)
+  b.writeUIntLE(479, 27, 3)
+  return b
+}
+const JPEG = jpeg()
+const PNG = png()
+const WEBP = webp()
 const b64 = (b: Buffer) => b.toString('base64')
 
 describe('detectImageMime', () => {
@@ -45,6 +63,38 @@ describe('createRateLimiter', () => {
   })
 })
 
+describe('createRateLimiter : mémoire bornée', () => {
+  it('50 000 clés différentes (IP falsifiées) : la mémoire reste bornée et le coût reste faible', () => {
+    const l = createRateLimiter(20, 600_000, Date.now, 1000)
+    const t0 = Date.now()
+    for (let i = 0; i < 50_000; i++) l.check('ip-' + i)
+    expect(l.size()).toBeLessThanOrEqual(1000)
+    expect(Date.now() - t0).toBeLessThan(1500)
+  })
+  it('une IP active n’est pas évincée par du bruit récent tant qu’elle reste dans les plus récentes', () => {
+    const l = createRateLimiter(2, 600_000, Date.now, 100)
+    l.check('a')
+    l.check('a')
+    expect(l.check('a').allowed).toBe(false)
+    for (let i = 0; i < 50; i++) l.check('x' + i)
+    expect(l.check('a').allowed).toBe(false)
+  })
+})
+
+describe('imageSize / decodeBase64Image', () => {
+  it('lit les dimensions déclarées', () => {
+    expect(imageSize(jpeg(1280, 720))).toEqual({ width: 1280, height: 720 })
+    expect(imageSize(png(30000, 40000))).toEqual({ width: 30000, height: 40000 })
+    expect(imageSize(webp())).toEqual({ width: 640, height: 480 })
+    expect(imageSize(Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0, 4, 0x4a, 0x46]))).toBeUndefined() // tronqué
+  })
+  it('base64 strict', () => {
+    expect(decodeBase64Image(b64(JPEG))?.length).toBe(JPEG.length)
+    expect(decodeBase64Image('data:image/jpeg;base64,' + b64(JPEG))?.length).toBe(JPEG.length)
+    for (const bad of ['', '***', 'abc def', '<script>', 'data:x,', 'AAAA=AAA', '\u0000AAAA']) expect(decodeBase64Image(bad)).toBeUndefined()
+  })
+})
+
 describe('isAllowedOrigin', () => {
   const host = 'permajardin.vercel.app'
   it('accepte les appels du même site et ceux sans en-têtes de navigateur', () => {
@@ -70,8 +120,11 @@ describe('isAllowedOrigin', () => {
 })
 
 describe('clientIp', () => {
-  it('prend la première adresse de x-forwarded-for', () => {
-    expect(clientIp({ 'x-forwarded-for': '1.2.3.4, 10.0.0.1' })).toBe('1.2.3.4')
+  it('préfère les en-têtes posés par Vercel, puis la DERNIÈRE valeur de x-forwarded-for (la première est falsifiable)', () => {
+    expect(clientIp({ 'x-vercel-forwarded-for': '9.9.9.9', 'x-real-ip': '8.8.8.8', 'x-forwarded-for': '6.6.6.6' })).toBe('9.9.9.9')
+    expect(clientIp({ 'x-real-ip': '8.8.8.8', 'x-forwarded-for': '6.6.6.6' })).toBe('8.8.8.8')
+    expect(clientIp({ 'x-forwarded-for': '6.6.6.6, 1.2.3.4' })).toBe('1.2.3.4') // « 6.6.6.6 » vient du client
+    expect(clientIp({ 'x-forwarded-for': '1.2.3.4' })).toBe('1.2.3.4')
     expect(clientIp({ 'x-real-ip': '5.6.7.8' })).toBe('5.6.7.8')
     expect(clientIp({}, '9.9.9.9')).toBe('9.9.9.9')
     expect(clientIp({})).toBe('inconnue')
@@ -129,9 +182,11 @@ describe('interpretPlantnet', () => {
 
 // ---------- Handler ----------
 
-function call(opts: { method?: string; headers?: Record<string, string>; body?: unknown } = {}) {
-  const headers: Record<string, string> = { host: 'permajardin.vercel.app', 'x-forwarded-for': `10.0.0.${Math.floor(Math.random() * 250)}`, ...opts.headers }
-  const req = { method: opts.method ?? 'POST', headers, body: opts.body, socket: { remoteAddress: '127.0.0.1' } } as unknown as VercelRequest
+function call(opts: { method?: string; headers?: Record<string, string>; body?: unknown; bodyThrows?: boolean } = {}) {
+  const headers: Record<string, string> = { host: 'permajardin.vercel.app', 'content-type': 'application/json', 'x-vercel-forwarded-for': `10.0.${Math.floor(Math.random() * 250)}.${Math.floor(Math.random() * 250)}`, ...opts.headers }
+  const req = { method: opts.method ?? 'POST', headers, socket: { remoteAddress: '127.0.0.1' } } as Record<string, unknown>
+  if (opts.bodyThrows) Object.defineProperty(req, 'body', { get: () => { throw new Error('Invalid JSON') } })
+  else req.body = opts.body
   const out: { status?: number; json?: Record<string, unknown>; headers: Record<string, string> } = { headers: {} }
   const res = {
     setHeader: (k: string, v: string) => void (out.headers[k.toLowerCase()] = v),
@@ -144,7 +199,7 @@ function call(opts: { method?: string; headers?: Record<string, string>; body?: 
       return res
     },
   } as unknown as VercelResponse
-  return handler(req, res).then(() => out)
+  return handler(req as unknown as VercelRequest, res).then(() => out)
 }
 
 describe('handler', () => {
@@ -234,12 +289,116 @@ describe('handler', () => {
 
   it('limite le débit par IP (429 avec Retry-After)', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response('{"results":[]}', { status: 200 })))
-    const headers = { 'x-forwarded-for': '203.0.113.7' }
+    const headers = { 'x-vercel-forwarded-for': '203.0.113.7' }
     let last: Awaited<ReturnType<typeof call>> | undefined
     for (let i = 0; i < 21; i++) last = await call({ headers, body: { images: [b64(JPEG)] } })
     expect(last?.status).toBe(429)
     expect(String(last?.json?.error)).toMatch(/Trop de demandes/)
     expect(Number(last?.headers['retry-after'])).toBeGreaterThan(0)
-    expect((await call({ headers: { 'x-forwarded-for': '203.0.113.8' }, body: { images: [b64(JPEG)] } })).status).toBe(200)
+    expect((await call({ headers: { 'x-vercel-forwarded-for': '203.0.113.8' }, body: { images: [b64(JPEG)] } })).status).toBe(200)
+  })
+
+  it('Allow: POST sur 405, et en-têtes de sécurité sur toutes les réponses', async () => {
+    const r = await call({ method: 'OPTIONS' })
+    expect(r.status).toBe(405)
+    expect(r.headers.allow).toBe('POST')
+    for (const res of [r, await call({ body: {} }), await call({ headers: { origin: 'https://evil.example' } })]) {
+      expect(res.headers['cache-control']).toBe('no-store')
+      expect(res.headers['x-content-type-options']).toBe('nosniff')
+      expect(res.headers['cross-origin-resource-policy']).toBe('same-origin')
+      expect(res.headers['content-security-policy']).toMatch(/default-src 'none'/)
+      expect(res.headers['referrer-policy']).toBe('no-referrer')
+      expect(res.headers['access-control-allow-origin']).toBeUndefined() // pas de CORS : réponse illisible depuis un autre site
+    }
+  })
+
+  it('415 si le type de contenu n’est pas application/json (requête « simple » inter-sites)', async () => {
+    for (const ct of ['text/plain', 'application/x-www-form-urlencoded', 'multipart/form-data; boundary=x', '']) {
+      expect((await call({ headers: { 'content-type': ct }, body: { images: [b64(JPEG)] } })).status).toBe(415)
+    }
+    expect((await call({ headers: { 'content-type': 'application/json; charset=utf-8' }, body: {} })).status).toBe(400)
+  })
+
+  it('400 JSON (pas d’exception) quand le corps JSON est invalide', async () => {
+    const lazy = await call({ bodyThrows: true })
+    expect(lazy.status).toBe(400)
+    expect(lazy.json).toEqual({ error: 'Requête illisible.' })
+    expect((await call({ body: '{pas du json' })).status).toBe(400)
+    expect((await call({ body: 'null' })).status).toBe(400)
+    expect((await call({ body: [1, 2] })).status).toBe(400)
+    expect((await call({ body: 42 })).status).toBe(400)
+  })
+
+  it('refuse les images qui ne sont pas du base64 strict, ou dont l’en-tête est tronqué', async () => {
+    expect((await call({ body: { images: ['<script>alert(1)</script>'] } })).status).toBe(400)
+    expect((await call({ body: { images: [b64(Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0, 4, 0x4a, 0x46]))] } })).status).toBe(400)
+    expect((await call({ body: { images: [{}] } })).status).toBe(400)
+    expect((await call({ body: { images: [123] } })).status).toBe(400)
+  })
+
+  it('refuse une « bombe de décompression » : petit fichier qui annonce 30 000 × 30 000 pixels', async () => {
+    const fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
+    for (const img of [png(30000, 30000), jpeg(20000, 20000), png(8000, 8000)]) {
+      const r = await call({ body: { images: [b64(img)] } })
+      expect(r.status).toBe(400)
+      expect(String(r.json?.error)).toMatch(/trop grande en dimensions/)
+    }
+    expect((await call({ body: { images: [b64(png(0, 10))] } })).status).toBe(400)
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('accepte une photo normale (1280 × 960) et un WebP', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('{"results":[]}', { status: 200 })))
+    expect((await call({ body: { images: [b64(jpeg(1280, 960)), b64(WEBP)] } })).status).toBe(200)
+  })
+
+  it('une IP falsifiée dans x-forwarded-for ne contourne pas la limite quand Vercel fournit l’IP réelle', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('{"results":[]}', { status: 200 })))
+    let last: Awaited<ReturnType<typeof call>> | undefined
+    for (let i = 0; i < 21; i++) last = await call({ headers: { 'x-vercel-forwarded-for': '198.51.100.9', 'x-forwarded-for': `${i}.${i}.${i}.${i}, 198.51.100.9` }, body: { images: [b64(JPEG)] } })
+    expect(last?.status).toBe(429)
+  })
+
+  it('n’appelle pas Pl@ntNet en suivant une redirection (la clé est dans l’URL)', async () => {
+    const fetchMock = vi.fn(async (_u: string, init: { redirect?: string }) => {
+      expect(init.redirect).toBe('error')
+      return new Response('{"results":[]}', { status: 200 })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    expect((await call({ body: { images: [b64(JPEG)] } })).status).toBe(200)
+  })
+
+  it('réponse Pl@ntNet démesurée : 502 propre', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('x'.repeat(1_200_000), { status: 200 })))
+    expect((await call({ body: { images: [b64(JPEG)] } })).status).toBe(502)
+  })
+
+  it('erreur inattendue : 500 générique, sans clé ni trace, journal nettoyé', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 200 })))
+    const form = FormData.prototype.append
+    vi.spyOn(FormData.prototype, 'append').mockImplementation(() => {
+      throw new TypeError('boom https://my-api.plantnet.org/?api-key=SECRET123')
+    })
+    const r = await call({ body: { images: [b64(JPEG)] } })
+    FormData.prototype.append = form
+    expect(r.status).toBe(500)
+    expect(JSON.stringify(r.json)).not.toMatch(/SECRET123|plantnet|boom/)
+    expect(JSON.stringify(vi.mocked(console.error).mock.calls)).not.toMatch(/SECRET123|my-api\.plantnet\.org/)
+  })
+
+  it('aucune image ni IP dans les journaux en cas d’échec Pl@ntNet', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('réseau') }))
+    await call({ headers: { 'x-vercel-forwarded-for': '203.0.113.200' }, body: { images: [b64(JPEG)] } })
+    const logged = JSON.stringify(vi.mocked(console.error).mock.calls)
+    expect(logged).not.toContain('203.0.113.200')
+    expect(logged).not.toContain(b64(JPEG))
+  })
+
+  it('503 sans clé n’est renvoyé qu’après les contrôles d’origine, de débit et de type', async () => {
+    vi.stubEnv('PLANTNET_API_KEY', '')
+    expect((await call({ headers: { origin: 'https://evil.example' } })).status).toBe(403)
+    expect((await call({ headers: { 'content-type': 'text/plain' } })).status).toBe(415)
+    expect((await call({ body: { images: [b64(JPEG)] } })).status).toBe(503)
   })
 })

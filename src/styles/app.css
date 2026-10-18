@@ -281,7 +281,9 @@ label:focus-within:has(> input.sr-only) {
 .show-mobile {
   display: none;
 }
-.garden-select {
+.garden-select,
+select.garden-select {
+  /* `select.input` (plus spécifique) imposait width: 100 % et étirait le sélecteur sur tout l'en-tête */
   width: auto;
   max-width: 220px;
 }
@@ -759,8 +761,8 @@ label.field > span {
     justify-content: center;
     align-items: center;
     width: 100%;
-    min-height: 28px;
-    margin-bottom: 4px;
+    min-height: 40px;
+    margin-bottom: 0;
     border: 0;
     background: transparent;
     cursor: pointer;

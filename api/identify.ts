@@ -1,6 +1,9 @@
 // Fonction serveur Vercel : relaie l'identification vers Pl@ntNet sans exposer la clé.
 // Quota gratuit : 500 identifications/jour pour toute l'appli.
 // La clé (PLANTNET_API_KEY) ne vit que dans les variables d'environnement Vercel : elle n'est ni renvoyée, ni journalisée.
+// Sécurité : voir docs/SECURITE.md (menace → mesure → fichier). Ce fichier est volontairement AUTONOME : une fonction Vercel
+// ne doit pas importer src/ (modules ES sans extension). Les fonctions d'image sont donc dupliquées de src/lib/security/image.ts
+// (un test compare les deux).
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 
 export const config = { maxDuration: 30 }
@@ -20,25 +23,88 @@ export function detectImageMime(buf: Uint8Array): 'image/jpeg' | 'image/png' | '
   return undefined
 }
 
+/** Plafonds d'une image envoyée à Pl@ntNet : le navigateur réduit déjà à 1280 px, donc ces valeurs ne gênent aucun usage normal. */
+export const MAX_IMAGE_SIDE = 8000
+export const MAX_IMAGE_PIXELS = 40_000_000
+
+const u16 = (b: Uint8Array, o: number) => (b[o] << 8) | b[o + 1]
+const u32 = (b: Uint8Array, o: number) => ((b[o] << 24) | (b[o + 1] << 16) | (b[o + 2] << 8) | b[o + 3]) >>> 0
+const ascii = (b: Uint8Array, o: number, n: number) => String.fromCharCode(...b.subarray(o, o + n))
+
+/** Dimensions déclarées par l'en-tête (PNG, JPEG, WebP), sans décoder l'image. undefined si tronqué ou incohérent. */
+export function imageSize(b: Uint8Array): { width: number; height: number } | undefined {
+  if (b.length >= 24 && b[0] === 0x89 && ascii(b, 1, 3) === 'PNG' && ascii(b, 12, 4) === 'IHDR') return { width: u32(b, 16), height: u32(b, 20) }
+  if (b.length >= 4 && b[0] === 0xff && b[1] === 0xd8) {
+    let o = 2
+    for (let guard = 0; o + 4 <= b.length && guard < 1000; guard++) {
+      if (b[o] !== 0xff) return undefined
+      const marker = b[o + 1]
+      if (marker === 0xff) {
+        o++
+        continue
+      }
+      if (marker === 0xd8 || marker === 0x01 || (marker >= 0xd0 && marker <= 0xd7)) {
+        o += 2
+        continue
+      }
+      if (marker === 0xd9 || marker === 0xda) return undefined
+      const len = u16(b, o + 2)
+      if (len < 2) return undefined
+      if (marker >= 0xc0 && marker <= 0xcf && marker !== 0xc4 && marker !== 0xc8 && marker !== 0xcc) {
+        if (o + 9 > b.length) return undefined
+        return { height: u16(b, o + 5), width: u16(b, o + 7) }
+      }
+      o += 2 + len
+    }
+    return undefined
+  }
+  if (b.length >= 30 && ascii(b, 0, 4) === 'RIFF' && ascii(b, 8, 4) === 'WEBP') {
+    const kind = ascii(b, 12, 4)
+    if (kind === 'VP8X') return { width: 1 + (b[24] | (b[25] << 8) | (b[26] << 16)), height: 1 + (b[27] | (b[28] << 8) | (b[29] << 16)) }
+    if (kind === 'VP8 ' && b[23] === 0x9d && b[24] === 0x01 && b[25] === 0x2a) return { width: (b[26] | (b[27] << 8)) & 0x3fff, height: (b[28] | (b[29] << 8)) & 0x3fff }
+    if (kind === 'VP8L' && b[20] === 0x2f) {
+      const bits = b[21] | (b[22] << 8) | (b[23] << 16) | (b[24] << 24)
+      return { width: 1 + (bits & 0x3fff), height: 1 + ((bits >>> 14) & 0x3fff) }
+    }
+  }
+  return undefined
+}
+
+/** Texte base64 (ou base64url) strict, avec préfixe « data:…, » facultatif. Renvoie les octets, ou undefined si ce n'est pas du base64. */
+export function decodeBase64Image(input: string): Buffer | undefined {
+  const raw = input.replace(/^data:[^,]{0,100},/, '')
+  if (raw.length === 0 || !/^[A-Za-z0-9+/_-]*={0,2}$/.test(raw)) return undefined
+  const bytes = Buffer.from(raw, 'base64')
+  return bytes.length > 0 ? bytes : undefined
+}
+
 /**
  * Limiteur de débit en mémoire (fenêtre glissante par clé).
  * GARDE-FOU PAR INSTANCE : chaque instance serverless a sa propre mémoire et elle est perdue à l'arrêt, donc la limite
  * réelle est plus large que `max`. Un vrai limiteur partagé (règle de limitation du pare-feu Vercel, ou Vercel KV / Upstash)
  * est préférable dès que l'appli est publique.
  */
-export function createRateLimiter(max: number, windowMs: number, now: () => number = Date.now) {
+export function createRateLimiter(max: number, windowMs: number, now: () => number = Date.now, maxKeys = 10_000) {
+  // Map = ordre d'insertion : à chaque accès la clé est réinsérée en dernier, donc la plus ancienne est en tête.
+  // La mémoire est BORNÉE à `maxKeys` clés : un attaquant qui change de clé à chaque requête ne peut ni la saturer
+  // ni ralentir le service (éviction d'une seule entrée par requête, coût constant).
   const hits = new Map<string, number[]>()
   return {
+    size: () => hits.size,
     check(key: string): { allowed: boolean; retryAfterSec: number } {
       const t = now()
       const recent = (hits.get(key) ?? []).filter((x) => t - x < windowMs)
+      hits.delete(key)
       if (recent.length >= max) {
         hits.set(key, recent)
         return { allowed: false, retryAfterSec: Math.max(1, Math.ceil((recent[0] + windowMs - t) / 1000)) }
       }
       recent.push(t)
       hits.set(key, recent)
-      if (hits.size > 5000) for (const [k, v] of hits) if (v.every((x) => t - x >= windowMs)) hits.delete(k)
+      while (hits.size > maxKeys) {
+        const oldest = hits.keys().next().value as string
+        hits.delete(oldest)
+      }
       return { allowed: true, retryAfterSec: 0 }
     },
   }
@@ -74,9 +140,15 @@ export function isAllowedOrigin(h: Headers): boolean {
   return true
 }
 
-/** IP du client d'après les en-têtes posés par Vercel. */
+/**
+ * IP du client. Sur Vercel, `x-vercel-forwarded-for` et `x-real-ip` sont posés par la plateforme (la valeur envoyée par le client est écrasée).
+ * `x-forwarded-for` n'est qu'un repli : on prend sa DERNIÈRE valeur (celle ajoutée par le proxy le plus proche), jamais la première,
+ * que le client peut falsifier pour contourner la limite de débit.
+ */
 export function clientIp(h: Headers, fallback?: string): string {
-  return header(h, 'x-forwarded-for')?.split(',')[0].trim() || header(h, 'x-real-ip') || fallback || 'inconnue'
+  const xff = header(h, 'x-forwarded-for')?.split(',').map((x) => x.trim()).filter(Boolean)
+  const first = (v: string | undefined) => v?.split(',')[0].trim() || undefined
+  return first(header(h, 'x-vercel-forwarded-for')) || header(h, 'x-real-ip')?.trim() || xff?.[xff.length - 1] || fallback || 'inconnue'
 }
 
 /** Message d'erreur sans URL ni clé (un échec de `fetch` peut contenir l'URL avec `api-key=`). */
@@ -133,17 +205,48 @@ export function interpretPlantnet(status: number, text: string): { status: numbe
 // ---------- Fonction ----------
 
 const limiter = createRateLimiter(20, 10 * 60_000)
+/** Plafond global par instance : limite la consommation du quota Pl@ntNet (500/jour pour toute l'appli) si de nombreuses adresses attaquent. */
+const globalLimiter = createRateLimiter(150, 10 * 60_000, Date.now, 1)
+/** Réponse Pl@ntNet : on n'en lit pas plus (réponse normale : quelques Ko). */
+const MAX_UPSTREAM_CHARS = 1_000_000
 
-export default async function handler(req: VercelRequest, res: VercelResponse) {
+function securityHeaders(res: VercelResponse) {
   res.setHeader('Cache-Control', 'no-store')
   res.setHeader('X-Content-Type-Options', 'nosniff')
-  if (req.method !== 'POST') return res.status(405).json({ error: 'Méthode non autorisée' })
+  res.setHeader('Content-Security-Policy', "default-src 'none'; frame-ancestors 'none'")
+  res.setHeader('Cross-Origin-Resource-Policy', 'same-origin')
+  res.setHeader('Referrer-Policy', 'no-referrer')
+  res.setHeader('X-Frame-Options', 'DENY')
+}
+
+export default async function handler(req: VercelRequest, res: VercelResponse) {
+  securityHeaders(res)
+  try {
+    return await handle(req, res)
+  } catch (e) {
+    // Dernier filet : jamais de trace d'exécution ni d'URL (donc de clé) dans la réponse ou les journaux.
+    console.error('identify: erreur inattendue :', scrubError(e, process.env.PLANTNET_API_KEY))
+    return res.status(500).json({ error: 'Erreur inattendue. Réessayez plus tard.' })
+  }
+}
+
+async function handle(req: VercelRequest, res: VercelResponse) {
+  if (req.method !== 'POST') {
+    res.setHeader('Allow', 'POST')
+    return res.status(405).json({ error: 'Méthode non autorisée' })
+  }
   if (!isAllowedOrigin(req.headers)) return res.status(403).json({ error: 'Origine non autorisée.' })
 
   const limit = limiter.check(clientIp(req.headers, req.socket?.remoteAddress))
-  if (!limit.allowed) {
-    res.setHeader('Retry-After', String(limit.retryAfterSec))
+  const globalLimit = limit.allowed ? globalLimiter.check('tous') : limit
+  if (!limit.allowed || !globalLimit.allowed) {
+    res.setHeader('Retry-After', String(Math.max(limit.retryAfterSec, globalLimit.retryAfterSec)))
     return res.status(429).json({ error: 'Trop de demandes, réessayez dans quelques minutes.' })
+  }
+
+  // JSON obligatoire : un autre type (text/plain, formulaire) est la signature d'une requête « simple » inter-sites.
+  if (!/^application\/json\s*(;|$)/i.test(header(req.headers, 'content-type') ?? '')) {
+    return res.status(415).json({ error: 'Type de contenu non pris en charge (application/json attendu).' })
   }
 
   const key = process.env.PLANTNET_API_KEY
@@ -156,15 +259,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const tooBig = { error: `Les photos sont trop lourdes (${(MAX_BODY_BYTES / 1_000_000).toFixed(1).replace('.', ',')} Mo maximum au total). Envoyez moins de photos ou des photos plus légères.` }
   if (Number(header(req.headers, 'content-length')) > MAX_BODY_BYTES) return res.status(413).json(tooBig)
 
-  let body: unknown = req.body
-  if (typeof body === 'string') {
-    try {
-      body = JSON.parse(body)
-    } catch {
-      return res.status(400).json({ error: 'Requête illisible.' })
-    }
+  // `req.body` est une propriété paresseuse : un JSON invalide LÈVE une exception à la lecture.
+  let body: unknown
+  try {
+    body = req.body
+    if (typeof body === 'string') body = JSON.parse(body)
+  } catch {
+    return res.status(400).json({ error: 'Requête illisible.' })
   }
-  const { images, organ = 'auto' } = (body && typeof body === 'object' ? body : {}) as { images?: unknown; organ?: unknown }
+  const { images, organ = 'auto' } = (body && typeof body === 'object' && !Array.isArray(body) ? body : {}) as { images?: unknown; organ?: unknown }
   if (!Array.isArray(images) || images.length === 0 || images.length > 5) return res.status(400).json({ error: 'Envoyez 1 à 5 photos.' })
   if (typeof organ !== 'string' || !ORGANS.has(organ)) return res.status(400).json({ error: 'Organe inconnu.' })
   let total = 0
@@ -176,9 +279,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const form = new FormData()
   for (const [i, b64] of (images as string[]).entries()) {
-    const bytes = Buffer.from(b64.replace(/^data:[^,]*,/, ''), 'base64')
+    const bytes = decodeBase64Image(b64)
+    if (!bytes) return res.status(400).json({ error: 'Photo illisible.' })
     const mime = detectImageMime(bytes)
     if (!mime) return res.status(400).json({ error: 'Format de photo non pris en charge (JPEG, PNG ou WebP uniquement).' })
+    const size = imageSize(bytes)
+    if (!size || size.width < 1 || size.height < 1) return res.status(400).json({ error: 'Photo illisible.' })
+    if (size.width > MAX_IMAGE_SIDE || size.height > MAX_IMAGE_SIDE || size.width * size.height > MAX_IMAGE_PIXELS) {
+      return res.status(400).json({ error: 'Photo trop grande en dimensions (8 000 pixels maximum par côté). Réduisez-la.' })
+    }
     form.append('images', new Blob([bytes], { type: mime }), `photo-${i}.${mime === 'image/png' ? 'png' : mime === 'image/webp' ? 'webp' : 'jpg'}`)
     form.append('organs', organ)
   }
@@ -187,8 +296,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const ctrl = new AbortController()
   const timer = setTimeout(() => ctrl.abort(), UPSTREAM_TIMEOUT_MS)
   try {
-    const r = await fetch(url, { method: 'POST', body: form, signal: ctrl.signal })
-    const out = interpretPlantnet(r.status, await r.text())
+    const r = await fetch(url, { method: 'POST', body: form, signal: ctrl.signal, redirect: 'error' })
+    const text = await r.text()
+    if (text.length > MAX_UPSTREAM_CHARS) return res.status(502).json({ error: 'Pl@ntNet a renvoyé une réponse illisible. Réessayez plus tard.' })
+    const out = interpretPlantnet(r.status, text)
     return res.status(out.status).json(out.body)
   } catch (e) {
     console.error('identify: échec de la requête Pl@ntNet :', scrubError(e, key))
