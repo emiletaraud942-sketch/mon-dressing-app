@@ -12,7 +12,7 @@
   },
   "dependencies": {
     "@react-three/drei": "^9.122.0",
-    "@react-three/fiber": "^8.17.10",
+    "@react-three/fiber": "^9.8.2",
     "@supabase/supabase-js": "^2.118.0",
     "idb-keyval": "^6.2.1",
     "maplibre-gl": "^4.7.1",
