@@ -18,6 +18,10 @@ const proxies = {
 // Un changement de code applicatif ne force donc pas à retélécharger React, MapLibre ou Three.
 // L'ordre compte : '@react-three' et 'three-stdlib' doivent être testés avant 'react'.
 function manualChunks(id: string): string | undefined {
+  // L'utilitaire de préchargement des imports dynamiques doit vivre dans un chunk toujours chargé.
+  // Sans cette ligne, Rollup le range dans le premier chunk manuel qui l'utilise (ex. `three`) :
+  // le point d'entrée dépendrait alors du chunk 3D et le chargerait au démarrage.
+  if (id.includes('vite/preload-helper')) return 'react'
   if (!id.includes('node_modules')) return undefined
   if (/node_modules\/(three|three-stdlib|@react-three)\//.test(id)) return 'three'
   if (/node_modules\/(react|react-dom|scheduler)\//.test(id)) return 'react'
@@ -62,9 +66,12 @@ export default defineConfig({
         skipWaiting: false,
         clientsClaim: false,
         maximumFileSizeToCacheInBytes: 6 * 1024 * 1024,
-        // Les gros chunks (3D, carte) ne sont pas préchargés à l'installation :
-        // ils sont mis en cache à la première utilisation (voir runtimeCaching ci-dessous).
-        globIgnores: ['assets/three-*.js', 'assets/maplibre-*.js'],
+        // Le chunk 3D (~860 ko, ~230 ko en gzip, écran secondaire) n'est pas préchargé à l'installation :
+        // il est mis en cache à la première ouverture de la 3D (voir runtimeCaching ci-dessous).
+        // MapLibre reste dans le précache : la carte est l'écran d'accueil et doit s'ouvrir hors ligne
+        // dès la première installation (son nom ne change qu'avec la bibliothèque, il n'est donc
+        // retéléchargé qu'à une mise à jour de MapLibre).
+        globIgnores: ['assets/three-*.js'],
         // Jamais de repli sur index.html pour les fonctions serveur et les proxys.
         navigateFallbackDenylist: [/^\/api\//, /^\/ext\//],
         // Règle d'or : on ne met JAMAIS en cache /api/* (identification), /ext/meteo*
@@ -72,12 +79,12 @@ export default defineConfig({
         // aucune des règles ci-dessous ne les couvre.
         runtimeCaching: [
           {
-            // Gros chunks chargés à la demande (hash dans le nom : immuables).
-            urlPattern: ({ url }) => /^\/assets\/(three|maplibre)-[^/]+\.js$/.test(url.pathname),
+            // Chunk 3D chargé à la demande (hash dans le nom : contenu immuable, donc CacheFirst).
+            urlPattern: ({ url }) => /^\/assets\/three-[^/]+\.js$/.test(url.pathname),
             handler: 'CacheFirst',
             options: {
-              cacheName: 'gros-chunks',
-              expiration: { maxEntries: 8, maxAgeSeconds: 60 * 60 * 24 * 90 },
+              cacheName: 'chunk-3d',
+              expiration: { maxEntries: 3, maxAgeSeconds: 60 * 60 * 24 * 90 },
               cacheableResponse: { statuses: [200] },
             },
           },

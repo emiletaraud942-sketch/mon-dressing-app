@@ -4,15 +4,21 @@
   --surface-2: #efeadd;
   --border: #ddd5c3;
   --text: #22301f;
-  --muted: #66705f;
+  --muted: #5a6454;
   --accent: #2f5d3a;
   --accent-2: #4f8a4b;
   --accent-soft: #dfecd8;
   --warn: #b5651d;
   --warn-soft: #f7e6d3;
+  --warn-text: #8a4a0f; /* texte d'avertissement : 5,6:1 sur --warn-soft, 6,7:1 sur --surface */
   --danger: #a33a2c;
   --danger-soft: #f6dcd7;
   --sun: #e2a72e;
+  --parcel: #ffe066; /* limite de parcelle, dessinée sur la photo aérienne */
+  --cal-abri: #4a86bd; /* semis abrité : 3,8:1 sur --surface */
+  --cal-harvest: #b06f00; /* récolte : 4,0:1 sur --surface */
+  --frost-bg: #dbe9f7;
+  --frost-text: #1d3c5c;
   --radius: 12px;
   --shadow: 0 1px 2px rgb(40 40 20 / 8%), 0 4px 16px rgb(40 40 20 / 6%);
   --nav-h: 64px;
@@ -26,15 +32,20 @@
     --surface-2: #253023;
     --border: #344232;
     --text: #e6ecdf;
-    --muted: #9eab97;
     --accent: #8cc47f;
     --accent-2: #a9d18e;
     --accent-soft: #263a24;
     --warn: #e7a35c;
     --warn-soft: #3a2c1c;
+    --warn-text: #e7a35c;
     --danger: #ec8a7c;
     --danger-soft: #3d2320;
     --shadow: 0 1px 2px rgb(0 0 0 / 30%), 0 4px 16px rgb(0 0 0 / 25%);
+    --muted: #aab6a3;
+    --cal-abri: #6aa5d6;
+    --cal-harvest: #e2a72e;
+    --frost-bg: #1d3247;
+    --frost-text: #cfe3f7;
     color-scheme: dark;
   }
 }
@@ -44,15 +55,20 @@
   --surface-2: #253023;
   --border: #344232;
   --text: #e6ecdf;
-  --muted: #9eab97;
   --accent: #8cc47f;
   --accent-2: #a9d18e;
   --accent-soft: #263a24;
   --warn: #e7a35c;
   --warn-soft: #3a2c1c;
+  --warn-text: #e7a35c;
   --danger: #ec8a7c;
   --danger-soft: #3d2320;
   --shadow: 0 1px 2px rgb(0 0 0 / 30%), 0 4px 16px rgb(0 0 0 / 25%);
+  --muted: #aab6a3;
+  --cal-abri: #6aa5d6;
+  --cal-harvest: #e2a72e;
+  --frost-bg: #1d3247;
+  --frost-text: #cfe3f7;
   color-scheme: dark;
 }
 
@@ -100,6 +116,32 @@ select,
 textarea {
   font: inherit;
   color: inherit;
+}
+/* 16 px : en dessous, iOS zoome la page à chaque focus d'un champ. */
+input,
+select,
+textarea {
+  font-size: 16px;
+}
+:focus-visible {
+  outline: 2px solid var(--accent-2);
+  outline-offset: 2px;
+}
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+/* Entrée de fichier masquée mais focalisable : le libellé montre le focus. */
+label:focus-within:has(> input.sr-only) {
+  outline: 2px solid var(--accent-2);
+  outline-offset: 2px;
 }
 
 /* ---------- Layout ---------- */
@@ -352,7 +394,7 @@ label.field > span {
 }
 .badge.warn {
   background: var(--warn-soft);
-  color: var(--warn);
+  color: var(--warn-text);
 }
 .badge.danger {
   background: var(--danger-soft);
@@ -436,13 +478,13 @@ label.field > span {
   background: var(--accent-2);
 }
 .months .m.on.abri {
-  background: #9cc3e6;
+  background: var(--cal-abri);
 }
 .months .m.on.plant {
   background: var(--accent);
 }
 .months .m.on.harvest {
-  background: var(--sun);
+  background: var(--cal-harvest);
 }
 .months .m.now {
   outline: 2px solid var(--text);
@@ -648,8 +690,12 @@ dialog.modal::backdrop {
   font-size: 0.8rem;
 }
 .weather-day.frost {
-  background: #dbe9f7;
-  color: #1d3c5c;
+  background: var(--frost-bg);
+  color: var(--frost-text);
+}
+.weather-day.frost .muted {
+  color: inherit;
+  opacity: 0.85;
 }
 .weather-day strong {
   display: block;

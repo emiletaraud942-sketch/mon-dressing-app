@@ -11,6 +11,7 @@ import { makeHeightSampler } from './terrain'
 import type { SunState } from './sun'
 import { fitOrtho, fitPerspective, orthoPixels, viewResetToken, walkResetToken, type Frame, type Insets, type ViewMode } from './framing'
 import { groundPointOnRay } from './drag'
+import { DEBUG_3D } from './debug'
 import { makeColliders, type DetailLevel, type WalkShared } from './walk'
 import { WalkRig } from './Walk'
 
@@ -321,21 +322,44 @@ export function Scene(props: SceneProps) {
   }, [walking])
   const colliders = useMemo(() => makeColliders(garden.buildings), [garden.buildings])
 
+  const builds = useRef(0)
   const { parts, visuals } = useMemo(
-    () =>
-      buildPlantScene({
+    () => {
+      builds.current++
+      return buildPlantScene({
         plants,
         speciesById,
         at: new Date(growthTime),
         month,
         sample,
         lod: walking ? lod : undefined,
-      }),
+      })
+    },
     // `rebuild` n'est pas lu : il force un nouveau calcul après un glisser (voir plus haut).
     [plants, speciesById, growthTime, month, sample, lod, walking, rebuild],
   )
   const visualsRef = useRef(visuals)
   visualsRef.current = visuals
+  // Mesures de développement (?debug=1) : projection d'une plante à l'écran, compteurs de rendu et de reconstruction.
+  useEffect(() => {
+    if (!DEBUG_3D) return
+    const w = window as unknown as { __g3d?: unknown }
+    w.__g3d = {
+      project: (id: string) => {
+        const v = visualsRef.current[id]
+        if (!v) return null
+        const { camera, gl: renderer } = get()
+        const r = renderer.domElement.getBoundingClientRect()
+        const p = new THREE.Vector3(v.base[0], v.base[1] + v.heightM * 0.4, v.base[2]).project(camera)
+        return { x: r.left + ((p.x + 1) / 2) * r.width, y: r.top + ((1 - p.y) / 2) * r.height }
+      },
+      base: (id: string) => visualsRef.current[id]?.base ?? null,
+      stats: () => ({ builds: builds.current, calls: gl.info.render.calls, triangles: gl.info.render.triangles, frames: gl.info.render.frame, geometries: gl.info.memory.geometries, textures: gl.info.memory.textures }),
+    }
+    return () => {
+      delete w.__g3d
+    }
+  }, [get, gl])
   const sampleRef = useRef(sample)
   sampleRef.current = sample
   const centerY = useMemo(() => sample((frame.bounds.minX + frame.bounds.maxX) / 2, (frame.bounds.minY + frame.bounds.maxY) / 2), [sample, frame.bounds])
@@ -489,6 +513,10 @@ export function Scene(props: SceneProps) {
   }
 
   const selected = selectedPlantId ? visuals[selectedPlantId] : undefined
+  // Après un glisser (ou son annulation), l'anneau reprend la position issue des données.
+  useLayoutEffect(() => {
+    if (selRef.current && selected) selRef.current.position.set(selected.base[0], selected.base[1], selected.base[2])
+  }, [selected])
   const hovered = hoverId && hoverId !== selectedPlantId ? visuals[hoverId] : undefined
 
   return (

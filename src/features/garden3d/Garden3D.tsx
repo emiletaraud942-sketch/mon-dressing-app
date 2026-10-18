@@ -1,11 +1,14 @@
 // Vue 3D du jardin : relief + orthophoto, bâtiments, plantes, soleil réel et ombres.
 // Repère : x = est, y = nord (m) ; Three.js : X = est, Y = haut, Z = -nord.
 import { Component, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { Canvas } from '@react-three/fiber'
+import { Canvas, type RootState } from '@react-three/fiber'
 import type { Garden, Plant, Species, XY } from '../../types'
 import { Scene } from './Scene'
-import { dateFromDoy, dayOfYear, sunState } from './sun'
-import { heatmapRange, rampColor } from './Ground'
+import { dateFromDoy, dayOfYear, daysInYearOf, doyOf, formatInGarden, sunState, zonedParts } from './sun'
+import { disposeBuildingMaterial, heatmapRange, rampColor } from './Ground'
+import { disposePlantMaterials } from './Plants'
+import { disposePartGeometries } from './plantModel'
+import { disposeGrassDetailTexture } from './groundDetail'
 import { NO_INSETS, gardenFrame, type Insets, type Rect, type ViewMode } from './framing'
 import { createWalkShared } from './walk'
 import { Joystick, MiniMap } from './WalkUI'
@@ -34,19 +37,42 @@ const HOUR_MAX = 22
 /** Durée (ms) d'une journée complète en lecture. */
 const PLAY_DURATION_MS = 12000
 
-class CanvasErrorBoundary extends Component<{ children: ReactNode }, { error: boolean }> {
+/** Libère les ressources GPU partagées entre visites (géométries, matériaux, texture d'herbe) ; recréées à la demande. */
+function disposeSharedResources() {
+  disposePartGeometries()
+  disposePlantMaterials()
+  disposeBuildingMaterial()
+  disposeGrassDetailTexture()
+}
+
+/** Repli si la 3D ne peut pas démarrer (WebGL absent, mémoire insuffisante) : message utile et « Réessayer ». */
+class CanvasErrorBoundary extends Component<{ children: ReactNode; onFail: (failed: boolean) => void }, { error: boolean }> {
   state = { error: false }
   static getDerivedStateFromError() {
     return { error: true }
   }
   componentDidCatch(err: unknown) {
     console.warn('[garden3d] rendu 3D impossible', err)
+    this.props.onFail(true)
+  }
+  retry = () => {
+    this.props.onFail(false)
+    this.setState({ error: false })
   }
   render() {
     if (this.state.error)
       return (
         <div className="g3d-error" role="alert">
-          La vue 3D n’a pas pu démarrer sur cet appareil (WebGL indisponible ?).
+          <div className="g3d-error-box">
+            <strong>La vue 3D n’a pas pu démarrer.</strong>
+            <p>
+              Votre appareil ou votre navigateur n’a pas pu afficher la 3D (WebGL indisponible, ou mémoire insuffisante).
+              Fermez les autres onglets puis réessayez. La carte 2D reste disponible.
+            </p>
+            <button type="button" className="g3d-btn" onClick={this.retry}>
+              Réessayer
+            </button>
+          </div>
         </div>
       )
     return this.props.children
@@ -78,15 +104,24 @@ function formatHour(h: number): string {
   return mm === 60 ? `${hh + 1} h 00` : `${hh} h ${String(mm).padStart(2, '0')}`
 }
 
+function RecenterIcon() {
+  return (
+    <svg viewBox="0 0 20 20" width="20" height="20" aria-hidden="true">
+      <circle cx="10" cy="10" r="4.5" fill="none" stroke="currentColor" strokeWidth="1.8" />
+      <path d="M10 1.5v3.5M10 15v3.5M1.5 10H5M15 10h3.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+    </svg>
+  )
+}
+
 const CARDINALS = ['N', 'NE', 'E', 'SE', 'S', 'SO', 'O', 'NO']
 function cardinal(deg: number) {
   return CARDINALS[Math.round(deg / 45) % 8]
 }
 
 function initialHour(center: Garden['center']): number {
-  const now = new Date()
-  const h = Math.min(HOUR_MAX, Math.max(HOUR_MIN, now.getHours() + Math.round(now.getMinutes() / 15) / 4))
-  const alt = sunState(dateFromDoy(now.getFullYear(), dayOfYear(now), h), center).altitudeDeg
+  const now = zonedParts(new Date()) // heure légale du jardin, pas celle de l'appareil
+  const h = Math.min(HOUR_MAX, Math.max(HOUR_MIN, now.hour + Math.round(now.minute / 15) / 4))
+  const alt = sunState(dateFromDoy(now.year, doyOf(now.year, now.month, now.day), h), center).altitudeDeg
   return alt > 5 ? h : 14
 }
 
@@ -104,12 +139,19 @@ export function Garden3D({
   defaultView = 'perspective',
 }: Garden3DProps) {
   const today = useMemo(() => new Date(), [])
-  const year = today.getFullYear()
+  const year = zonedParts(today).year
   const [doy, setDoy] = useState(() => dayOfYear(today))
   const [hour, setHour] = useState(() => initialHour(garden.center))
   const [yearsAhead, setYearsAhead] = useState(0)
   const [mode, setMode] = useState<ViewMode>(defaultView)
   const [fitNonce, setFitNonce] = useState(0)
+  const [gotoNonce, setGotoNonce] = useState(0)
+  const [atLimit, setAtLimit] = useState(false)
+  const [failed, setFailed] = useState(false)
+  // Perte du contexte WebGL : 'lost' = reprise automatique en cours, 'stuck' = la reprise tarde (bouton « Réessayer »).
+  const [ctx, setCtx] = useState<'ok' | 'lost' | 'stuck'>('ok')
+  const [canvasKey, setCanvasKey] = useState(0)
+  const ctxCleanup = useRef<(() => void) | null>(null)
   const [walkHint, setWalkHint] = useState(false)
   const rootRef = useRef<HTMLDivElement>(null)
   const walkShared = useMemo(() => createWalkShared(), [])
@@ -120,13 +162,52 @@ export function Garden3D({
 
   // Emprise du jardin (parcelle, sinon plantes, sinon ±15 m) : cadrage et taille du sol.
   const hasParcel = !!garden.parcel && garden.parcel.length > 2
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+  // Avec une parcelle, l'emprise ne dépend pas des plantes : on ne la recalcule pas à chaque déplacement.
   const frame = useMemo(() => gardenFrame(garden.parcel, plants), [garden.parcel, hasParcel ? null : plants])
   const halfSizeM = halfSizeProp ?? frame.halfSizeM
-  // Nouvelle parcelle : la promenade repart de l'entrée.
+  // Autre jardin : la promenade repart de l'entrée. L'emprise, elle, ne déplace jamais le promeneur.
   useEffect(() => {
     walkShared.saved = false
-  }, [frame.key, walkShared])
+  }, [garden.id, walkShared])
+
+  // Libère les ressources GPU partagées à la sortie de l'onglet 3D (elles sont recréées à la visite suivante).
+  useEffect(
+    () => () => {
+      ctxCleanup.current?.()
+      ctxCleanup.current = null
+      disposeSharedResources()
+    },
+    [],
+  )
+
+  // Perte / reprise du contexte WebGL (mémoire, changement d'application sur mobile) : la scène revient seule.
+  // Three.js recrée lui-même ses programmes et ses tampons ; il reste à redessiner (rendu à la demande).
+  const onCreated = useCallback((state: RootState) => {
+    ctxCleanup.current?.()
+    const el = state.gl.domElement
+    let stuckTimer = 0
+    let kick = 0
+    const onLost = (e: Event) => {
+      e.preventDefault() // sans cela le navigateur ne tentera jamais de restaurer le contexte
+      setCtx('lost')
+      window.clearTimeout(stuckTimer)
+      stuckTimer = window.setTimeout(() => setCtx((c) => (c === 'lost' ? 'stuck' : c)), 6000)
+    }
+    const onRestored = () => {
+      window.clearTimeout(stuckTimer)
+      setCtx('ok')
+      state.invalidate()
+      kick = window.setTimeout(() => state.invalidate(), 120) // une seconde image, le temps que Three.js ait réinitialisé son état
+    }
+    el.addEventListener('webglcontextlost', onLost)
+    el.addEventListener('webglcontextrestored', onRestored)
+    ctxCleanup.current = () => {
+      window.clearTimeout(stuckTimer)
+      window.clearTimeout(kick)
+      el.removeEventListener('webglcontextlost', onLost)
+      el.removeEventListener('webglcontextrestored', onRestored)
+    }
+  }, [])
 
   /** Hauteur des bandeaux de l'interface, pour cadrer dans la zone réellement visible. */
   const getInsets = useCallback((): Insets => {
@@ -154,6 +235,7 @@ export function Garden3D({
   useEffect(() => {
     if (!walking) {
       setWalkHint(false)
+      setAtLimit(false)
       walkShared.run = false
       setRunning(false)
       return
@@ -203,9 +285,10 @@ export function Garden3D({
     setPlaying((p) => !p)
   }
 
+  // L'heure du curseur est l'heure légale du jardin (Europe/Paris), quel que soit le fuseau de l'appareil.
   const sunDate = useMemo(() => dateFromDoy(year, doy, hour), [year, doy, hour])
   const sun = useMemo(() => sunState(sunDate, garden.center), [sunDate, garden.center])
-  const month = sunDate.getMonth() + 1
+  const month = zonedParts(sunDate).month
   const growthTime = useMemo(() => {
     const d = new Date(today)
     d.setFullYear(d.getFullYear() + yearsAhead)
@@ -214,14 +297,14 @@ export function Garden3D({
 
   const shortcuts = useMemo(
     () => [
-      { label: '21 mars', doy: dayOfYear(new Date(year, 2, 21)) },
-      { label: '21 juin', doy: dayOfYear(new Date(year, 5, 21)) },
-      { label: '21 déc.', doy: dayOfYear(new Date(year, 11, 21)) },
+      { label: '21 mars', doy: doyOf(year, 3, 21) },
+      { label: '21 juin', doy: doyOf(year, 6, 21) },
+      { label: '21 déc.', doy: doyOf(year, 12, 21) },
     ],
     [year],
   )
-  const daysInYear = dayOfYear(new Date(year, 11, 31))
-  const dateLabel = sunDate.toLocaleDateString('fr-FR', { day: 'numeric', month: 'long' })
+  const daysInYear = daysInYearOf(year)
+  const dateLabel = formatInGarden(sunDate, { day: 'numeric', month: 'long' })
 
   const heatRange = useMemo(() => (sunHeatmap ? heatmapRange(sunHeatmap.values) : null), [sunHeatmap])
   const heatGradient = useMemo(
@@ -231,16 +314,19 @@ export function Garden3D({
   )
 
   const placingName = placingSpeciesId ? speciesById[placingSpeciesId]?.nomCommun ?? 'la plante' : undefined
+  const hasSelection = !!selectedPlantId && plants.some((p) => p.id === selectedPlantId)
 
   return (
-    <div className="g3d-root" ref={rootRef} data-mode={mode}>
-      <CanvasErrorBoundary>
+    <div className="g3d-root" ref={rootRef} data-mode={mode} data-failed={failed || undefined}>
+      <CanvasErrorBoundary onFail={setFailed}>
         <Canvas
+          key={canvasKey}
           className="g3d-canvas"
           shadows
           dpr={[1, 2]}
           frameloop="demand"
           gl={{ antialias: true, powerPreference: 'high-performance' }}
+          onCreated={onCreated}
           onPointerMissed={(e) => {
             if (e.type === 'click' && !placingSpeciesId) onSelectPlant(undefined)
           }}
@@ -260,6 +346,8 @@ export function Garden3D({
             mode={mode}
             frame={frame}
             fitNonce={fitNonce}
+            gotoNonce={gotoNonce}
+            onWalkLimit={setAtLimit}
             getInsets={getInsets}
             walkShared={walkShared}
             reducedMotion={reducedMotion}
@@ -288,9 +376,9 @@ export function Garden3D({
             <div className="g3d-compass" title="Nord" aria-label="Flèche du nord">
               <div ref={compassRef} className="g3d-compass-needle">
                 <svg viewBox="0 0 40 40" width="40" height="40" aria-hidden="true">
-                  <polygon points="20,4 26,21 20,18 14,21" fill="#d6452f" />
+                  <polygon className="g3d-needle-north" points="20,4 26,21 20,18 14,21" />
                   <polygon points="20,36 26,19 20,22 14,19" fill="currentColor" opacity="0.45" />
-                  <text x="20" y="13.5" textAnchor="middle" fontSize="7" fontWeight="700" fill="#fff">
+                  <text className="g3d-needle-letter" x="20" y="13.5" textAnchor="middle" fontSize="7" fontWeight="700">
                     N
                   </text>
                 </svg>
@@ -321,6 +409,25 @@ export function Garden3D({
           </div>
         </div>
 
+        {ctx !== 'ok' && (
+          <div className="g3d-chip g3d-hint g3d-notice" role="status">
+            {ctx === 'lost' ? (
+              'Affichage interrompu — reprise automatique…'
+            ) : (
+              <>
+                Affichage interrompu.{' '}
+                <button type="button" className="g3d-btn g3d-btn--small" onClick={() => { setCtx('ok'); setCanvasKey((k) => k + 1) }}>
+                  Réessayer
+                </button>
+              </>
+            )}
+          </div>
+        )}
+        {walking && atLimit && (
+          <div className="g3d-chip g3d-hint g3d-notice" role="status">
+            Limite du jardin
+          </div>
+        )}
         {placingName && <div className="g3d-chip g3d-hint">Touchez le sol pour planter : {placingName}</div>}
         <div className="g3d-bottom">
           {showHeatmap && heatRange && (
@@ -360,6 +467,30 @@ export function Garden3D({
             </div>
           )}
 
+          {walking && (
+            <div className="g3d-walkactions">
+              <button
+                type="button"
+                className="g3d-btn"
+                title="Revenir à l’entrée du jardin"
+                onClick={() => setFitNonce((n) => n + 1)}
+              >
+                <RecenterIcon />
+                <span className="g3d-btn-text">Recentrer</span>
+              </button>
+              {hasSelection && (
+                <button
+                  type="button"
+                  className="g3d-btn"
+                  title="Se placer près de la plante sélectionnée, en la regardant"
+                  onClick={() => setGotoNonce((n) => n + 1)}
+                >
+                  Aller à cette plante
+                </button>
+              )}
+            </div>
+          )}
+
           <div className="g3d-bar">
             <div className="g3d-seg" role="group" aria-label="Mode de vue">
               {MODES.map((m) => (
@@ -375,18 +506,17 @@ export function Garden3D({
                 </button>
               ))}
             </div>
-            <button
-              type="button"
-              className="g3d-btn g3d-btn--icon g3d-recenter"
-              aria-label="Recentrer sur le jardin"
-              title={walking ? 'Revenir à l’entrée du jardin' : 'Recentrer sur le jardin'}
-              onClick={() => setFitNonce((n) => n + 1)}
-            >
-              <svg viewBox="0 0 20 20" width="20" height="20" aria-hidden="true">
-                <circle cx="10" cy="10" r="4.5" fill="none" stroke="currentColor" strokeWidth="1.8" />
-                <path d="M10 1.5v3.5M10 15v3.5M1.5 10H5M15 10h3.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-              </svg>
-            </button>
+            {!walking && (
+              <button
+                type="button"
+                className="g3d-btn g3d-btn--icon g3d-recenter"
+                aria-label="Recentrer sur le jardin"
+                title="Recentrer sur le jardin"
+                onClick={() => setFitNonce((n) => n + 1)}
+              >
+                <RecenterIcon />
+              </button>
+            )}
           </div>
 
           <div className="g3d-panel">

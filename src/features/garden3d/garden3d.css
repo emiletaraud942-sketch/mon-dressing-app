@@ -6,12 +6,14 @@
   --g3d-accent: var(--accent, #2f5d3a);
   --g3d-border: var(--border, #ddd5c3);
   --g3d-radius: var(--radius, 12px);
+  --g3d-north: var(--danger, #a33a2c);
+  --g3d-sky: #9cc3e4;
   position: relative;
   width: 100%;
   height: 100%;
   min-height: 240px;
   overflow: hidden;
-  background: #9cc3e4;
+  background: var(--g3d-sky);
   color: var(--g3d-text);
   font-size: 14px;
   user-select: none;
@@ -28,12 +30,33 @@
 .g3d-error {
   position: absolute;
   inset: 0;
+  z-index: 11;
   display: grid;
   place-items: center;
   padding: 24px;
   text-align: center;
   background: var(--g3d-surface);
   color: var(--g3d-muted);
+}
+.g3d-error-box {
+  display: grid;
+  gap: 8px;
+  justify-items: center;
+  max-width: 360px;
+}
+.g3d-error-box strong {
+  color: var(--g3d-text);
+}
+.g3d-error-box p {
+  margin: 0;
+  line-height: 1.4;
+}
+.g3d-error .g3d-btn {
+  pointer-events: auto;
+}
+/* Si la 3D n'a pas pu démarrer, les commandes de vue n'ont plus de sens. */
+.g3d-root[data-failed] .g3d-overlay {
+  display: none;
 }
 
 /* ----- Overlay ----- */
@@ -98,6 +121,19 @@
   text-align: center;
 }
 
+.g3d-notice {
+  position: absolute;
+  top: 56px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 12;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+  font-size: 13px;
+}
+
 .g3d-hint--walk {
   max-width: 94%;
   font-size: 13px;
@@ -126,6 +162,12 @@
   width: 40px;
   height: 40px;
   transform-origin: 50% 50%;
+}
+.g3d-needle-north {
+  fill: var(--g3d-north);
+}
+.g3d-needle-letter {
+  fill: var(--g3d-surface);
 }
 
 .g3d-btn {
@@ -158,6 +200,15 @@
   padding: 0;
   width: 40px;
   flex: none;
+}
+.g3d-btn-text {
+  margin-left: 6px;
+}
+.g3d-walkactions {
+  display: flex;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 .g3d-btn--small {
   padding: 0 8px;
@@ -337,7 +388,7 @@
 }
 .g3d-field input[type='range'] {
   width: 100%;
-  height: 32px;
+  height: 40px;
   margin: 0;
   accent-color: var(--g3d-accent);
   cursor: pointer;
@@ -354,16 +405,16 @@
 .g3d-label {
   padding: 3px 8px;
   border-radius: 999px;
-  background: rgb(20 28 18 / 78%);
-  color: #fff;
+  background: color-mix(in srgb, var(--g3d-text) 84%, transparent);
+  color: var(--g3d-surface);
   font: 600 12px/1.3 system-ui, sans-serif;
   white-space: nowrap;
   pointer-events: none;
   transform: translateY(-50%);
 }
 .g3d-label--selected {
-  background: #ffd84d;
-  color: #2a2a12;
+  background: var(--g3d-accent);
+  color: var(--g3d-surface);
 }
 
 @media (max-width: 480px) {

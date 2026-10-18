@@ -1,12 +1,22 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { User } from '@supabase/supabase-js'
 import { Icon } from '../../components/Icon'
-import { getState, removeGarden, replaceData, updateGarden, useGardenPlants } from '../../lib/store'
-import { currentUser, pullSnapshot, pushSnapshot, sendMagicLink, signOut, syncAvailable } from '../../lib/sync'
+import { Modal } from '../../components/Modal'
+import { exportCurrentState, lastExportAt, REMIND_EVERY_DAYS } from '../../lib/backup'
+import { getLoadWarnings, getState, removeGarden, replaceData, updateGarden, useGardenPlants, useStorageStatus, useStore } from '../../lib/store'
+import { migrateState, type StateData } from '../../lib/migrate'
+import { currentUser, pullSnapshot, pushSnapshot, sendMagicLink, signOut, syncAvailable, SyncConflictError } from '../../lib/sync'
+import { getTheme, setTheme, THEME_LABEL, type Theme } from '../../lib/theme'
+import { showToast } from '../../lib/toast'
+import { setUi, useUi } from '../../lib/ui'
 import { doyToLabel } from '../../lib/weather'
 import type { Garden, SoilTexture } from '../../types'
 import { GardenCreator } from './GardenCreator'
-import { buildGarden, INITIAL_STEPS, type Step } from './createGarden'
+import { GardenDataBanner } from './GardenDataBanner'
+import { FAIL_HELP } from './createGarden'
+import { uniqueGardenName } from './gardenName'
+import { describeCounts, importQuestion } from './importSummary'
+import { useRefreshGarden } from './useRefreshGarden'
 
 const SOILS: [SoilTexture, string][] = [
   ['limoneux', 'Limoneux (équilibré)'],
@@ -18,26 +28,32 @@ const SOILS: [SoilTexture, string][] = [
 
 function GardenInfo({ garden }: { garden: Garden }) {
   const plants = useGardenPlants(garden.id)
-  const [steps, setSteps] = useState<Step[]>()
+  const gardens = useStore((s) => s.gardens)
+  const { steps, refresh, busy } = useRefreshGarden(garden)
+  const [name, setName] = useState(garden.name)
+  useEffect(() => setName(garden.name), [garden.id, garden.name])
 
-  async function refresh() {
-    setSteps(INITIAL_STEPS.map((s) => ({ ...s })))
-    const g = await buildGarden(
-      { label: garden.address, lon: garden.center.lon, lat: garden.center.lat },
-      garden.name,
-      (id, state, detail) => setSteps((prev) => prev?.map((s) => (s.id === id ? { ...s, state, detail } : s))),
-      garden,
-    )
-    updateGarden(garden.id, g)
+  function commitName() {
+    const others = gardens.filter((g) => g.id !== garden.id).map((g) => g.name)
+    const final = uniqueGardenName(name, others)
+    setName(final)
+    if (final !== garden.name) updateGarden(garden.id, { name: final })
   }
 
   return (
     <div className="card">
       <h2>Jardin</h2>
+      <GardenDataBanner garden={garden} />
       <div className="grid cols-2">
         <label className="field">
           <span>Nom</span>
-          <input className="input" value={garden.name} onChange={(e) => updateGarden(garden.id, { name: e.target.value })} />
+          <input
+            className="input"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            onBlur={commitName}
+            onKeyDown={(e) => e.key === 'Enter' && e.currentTarget.blur()}
+          />
         </label>
         <label className="field">
           <span>Nature du sol</span>
@@ -61,13 +77,13 @@ function GardenInfo({ garden }: { garden: Garden }) {
           Altitude : {garden.altitudeM != null ? `${garden.altitudeM} m` : 'inconnue'} · {garden.buildings?.length ?? 0} bâtiments modélisés
         </li>
         <li>
-          Gelées : {garden.lastFrostDoy ? `dernières vers le ${doyToLabel(garden.lastFrostDoy)}` : 'inconnues'}
+          Gelées : {garden.lastFrostDoy ? `dernières vers le ${doyToLabel(garden.lastFrostDoy)}` : 'inconnues ou absentes'}
           {garden.firstFrostDoy ? `, premières vers le ${doyToLabel(garden.firstFrostDoy)}` : ''}
         </li>
         <li>{plants.length} plantes</li>
       </ul>
       <div className="row" style={{ marginTop: 8 }}>
-        <button className="btn small" onClick={refresh} disabled={steps?.some((s) => s.state === 'en-cours')}>
+        <button className="btn small" onClick={refresh} disabled={busy}>
           Recharger les données IGN et météo
         </button>
         <button
@@ -78,11 +94,11 @@ function GardenInfo({ garden }: { garden: Garden }) {
         </button>
       </div>
       {steps && (
-        <ul className="steps small">
+        <ul className="steps small" aria-live="polite">
           {steps.map((s) => (
             <li key={s.id}>
               {s.state === 'en-cours' ? <span className="spinner" /> : s.state === 'ok' ? '✓' : s.state === 'echec' ? '✗' : '○'} {s.label}
-              {s.detail && <span className="muted"> — {s.detail}</span>}
+              {s.state === 'echec' ? <span className="muted"> — {FAIL_HELP[s.id]}</span> : s.detail && <span className="muted"> — {s.detail}</span>}
             </li>
           ))}
         </ul>
@@ -91,43 +107,135 @@ function GardenInfo({ garden }: { garden: Garden }) {
   )
 }
 
+interface PendingImport {
+  data: StateData
+  warnings: string[]
+  fileName: string
+}
+
+const countOf = (d: Pick<StateData, 'gardens' | 'plants'>) => ({ gardens: d.gardens.length, plants: d.plants.length })
+
+function ImportDialog({ pending, onClose, onDone }: { pending: PendingImport; onClose: () => void; onDone: (msg: string) => void }) {
+  const current = getState()
+  const hasCurrent = current.gardens.length > 0 || current.plants.length > 0
+  const hasPhotos = current.plants.some((p) => p.photos.length > 0)
+  const [backup, setBackup] = useState(hasCurrent)
+
+  function confirmImport() {
+    if (backup && hasCurrent) exportCurrentState('permajardin-avant-import', false)
+    replaceData(pending.data)
+    onDone(`Import réussi : ${describeCounts(countOf(pending.data))}.`)
+  }
+
+  return (
+    <Modal title="Importer une sauvegarde" onClose={onClose}>
+      <p>
+        <strong>{importQuestion(countOf(current), countOf(pending.data))}</strong>
+      </p>
+      <p className="small muted">Fichier : {pending.fileName}</p>
+      {pending.warnings.length > 0 && (
+        <div className="alert small" style={{ marginBottom: 12 }}>
+          <strong>Le fichier a été corrigé à l'import :</strong>
+          <ul style={{ margin: '4px 0 0', paddingLeft: 18 }}>
+            {pending.warnings.map((w, i) => (
+              <li key={i}>{w}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {hasPhotos && <p className="alert small">Les photos ne sont pas dans la sauvegarde : celles de vos plantes actuelles seront supprimées de cet appareil.</p>}
+      {hasCurrent && (
+        <label className="row" style={{ gap: 10, margin: '12px 0', minHeight: 40 }}>
+          <input type="checkbox" className="check" checked={backup} onChange={(e) => setBackup(e.target.checked)} />
+          <span>Télécharger d'abord une copie de mes données actuelles</span>
+        </label>
+      )}
+      <div className="row" style={{ justifyContent: 'flex-end' }}>
+        <button className="btn" onClick={onClose}>
+          Annuler
+        </button>
+        <button className="btn primary" onClick={confirmImport}>
+          {hasCurrent ? 'Remplacer mes données' : 'Importer'}
+        </button>
+      </div>
+    </Modal>
+  )
+}
+
 function Backup() {
-  const [msg, setMsg] = useState<string>()
+  const [msg, setMsg] = useState<{ text: string; error?: boolean }>()
+  const [pending, setPending] = useState<PendingImport>()
+  const { persistent } = useStorageStatus()
+  const [last, setLast] = useState(lastExportAt())
+  const overdue = !last || Date.now() - last > REMIND_EVERY_DAYS * 86400000
+  const warnings = useRef(getLoadWarnings()).current
+
   function exportJson() {
-    const { gardens, plants, tasksDone } = getState()
-    const blob = new Blob([JSON.stringify({ version: 1, exportedAt: new Date().toISOString(), gardens, plants, tasksDone }, null, 2)], { type: 'application/json' })
-    const a = document.createElement('a')
-    a.href = URL.createObjectURL(blob)
-    a.download = `permajardin-${new Date().toISOString().slice(0, 10)}.json`
-    a.click()
-    URL.revokeObjectURL(a.href)
+    exportCurrentState()
+    setLast(Date.now())
+    setMsg(undefined)
+    showToast({ message: 'Sauvegarde exportée dans vos téléchargements.' })
   }
-  async function importJson(file?: File) {
+
+  async function importJson(input: HTMLInputElement) {
+    const file = input.files?.[0]
+    input.value = '' // permet de réimporter le même fichier
     if (!file) return
+    setMsg(undefined)
+    let raw: unknown
     try {
-      const data = JSON.parse(await file.text())
-      if (!Array.isArray(data.gardens) || !Array.isArray(data.plants)) throw new Error('Fichier non reconnu')
-      if (!confirm('Remplacer toutes les données de ce navigateur par celles du fichier ?')) return
-      replaceData({ gardens: data.gardens, plants: data.plants, tasksDone: data.tasksDone ?? [] })
-      setMsg(`${data.gardens.length} jardin(s) et ${data.plants.length} plantes importés.`)
-    } catch (e) {
-      setMsg('Import impossible : ' + (e as Error).message)
+      raw = JSON.parse(await file.text())
+    } catch {
+      setMsg({ text: "Import impossible : ce fichier n'est pas une sauvegarde PermaJardin (JSON illisible).", error: true })
+      return
     }
+    const r = migrateState(raw)
+    if (!r.ok) {
+      setMsg({ text: 'Import impossible : ' + r.error, error: true })
+      return
+    }
+    setPending({ data: r.data, warnings: r.warnings, fileName: file.name })
   }
+
   return (
     <div className="card">
       <h2>Sauvegarde</h2>
       <p className="small muted">Vos données sont stockées dans ce navigateur. Exportez-les régulièrement (les photos restent sur l'appareil).</p>
+      <p className={'small' + (overdue ? ' warn-text' : ' muted')}>
+        {last ? `Dernière sauvegarde : ${new Date(last).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' })}.` : 'Aucune sauvegarde exportée pour l’instant.'}
+        {overdue && ' Pensez à en faire une.'}
+      </p>
+      {persistent === false && <p className="small muted">Le navigateur peut effacer ces données si l'espace manque : une sauvegarde est d'autant plus utile.</p>}
+      {warnings.length > 0 && (
+        <p className="alert small">
+          Certaines données stockées ont été corrigées au démarrage : {warnings.join(' ')}
+        </p>
+      )}
       <div className="row">
         <button className="btn" onClick={exportJson}>
           <Icon name="download" /> Exporter
         </button>
-        <label className="btn">
+        <label className="btn file-btn">
           <Icon name="upload" /> Importer
-          <input type="file" accept="application/json" hidden onChange={(e) => importJson(e.target.files?.[0])} />
+          <input className="sr-only" type="file" accept="application/json,.json" onChange={(e) => void importJson(e.target)} />
         </label>
       </div>
-      {msg && <p className="small" style={{ marginTop: 8 }}>{msg}</p>}
+      {msg && (
+        <p className={'small' + (msg.error ? ' alert error' : '')} role={msg.error ? 'alert' : 'status'} style={{ marginTop: 8 }}>
+          {msg.text}
+        </p>
+      )}
+      {pending && (
+        <ImportDialog
+          pending={pending}
+          onClose={() => setPending(undefined)}
+          onDone={(text) => {
+            setPending(undefined)
+            setMsg({ text })
+            showToast({ message: text })
+          }}
+        />
+      )}
     </div>
   )
 }
@@ -136,11 +244,39 @@ function Sync() {
   const [user, setUser] = useState<User | null>(null)
   const [email, setEmail] = useState('')
   const [msg, setMsg] = useState<string>()
+  const [conflict, setConflict] = useState<SyncConflictError>()
+  const [busy, setBusy] = useState(false)
   useEffect(() => {
-    currentUser().then(setUser)
+    currentUser().then(setUser, () => undefined)
   }, [])
   if (!syncAvailable()) return null
-  const run = (f: () => Promise<unknown>, ok: string) => () => f().then(() => setMsg(ok), (e) => setMsg((e as Error).message))
+
+  async function run(f: () => Promise<string | void>) {
+    setBusy(true)
+    setMsg(undefined)
+    try {
+      const ok = await f()
+      if (ok) setMsg(ok)
+    } catch (e) {
+      if (e instanceof SyncConflictError) setConflict(e)
+      else setMsg((e as Error).message)
+    } finally {
+      setBusy(false)
+    }
+  }
+  const push = (force = false) =>
+    run(async () => {
+      await pushSnapshot({ force })
+      setConflict(undefined)
+      return 'Données envoyées.'
+    })
+  const pull = () =>
+    run(async () => {
+      if (!confirm('Remplacer les données de cet appareil par celles en ligne ?')) return
+      setConflict(undefined)
+      return (await pullSnapshot()) ? 'Données récupérées.' : 'Rien à récupérer : aucune sauvegarde en ligne.'
+    })
+
   return (
     <div className="card">
       <h2>Synchronisation entre appareils</h2>
@@ -148,40 +284,126 @@ function Sync() {
         <>
           <p className="small">Connecté : {user.email}</p>
           <div className="row">
-            <button className="btn" onClick={run(pushSnapshot, 'Données envoyées.')}>Envoyer mes données</button>
-            <button className="btn" onClick={run(async () => confirm('Remplacer les données locales ?') && pullSnapshot(), 'Données récupérées.')}>Récupérer</button>
-            <button className="btn ghost" onClick={run(async () => (await signOut(), setUser(null)), 'Déconnecté.')}>Se déconnecter</button>
+            <button className="btn" disabled={busy} onClick={() => push()}>
+              Envoyer mes données
+            </button>
+            <button className="btn" disabled={busy} onClick={pull}>
+              Récupérer
+            </button>
+            <button className="btn ghost" disabled={busy} onClick={() => run(async () => (await signOut(), setUser(null), 'Déconnecté.'))}>
+              Se déconnecter
+            </button>
           </div>
+          {conflict && (
+            <div className="alert small" role="alert" style={{ marginTop: 10 }}>
+              <p>{conflict.message}</p>
+              <div className="row">
+                <button className="btn small" disabled={busy} onClick={pull}>
+                  Récupérer
+                </button>
+                <button className="btn small danger" disabled={busy} onClick={() => push(true)}>
+                  Écraser
+                </button>
+                <button className="btn small" onClick={() => setConflict(undefined)}>
+                  Annuler
+                </button>
+              </div>
+            </div>
+          )}
         </>
       ) : (
-        <div className="row">
-          <input className="input" style={{ flex: 1, minWidth: 200 }} type="email" placeholder="votre@email.fr" value={email} onChange={(e) => setEmail(e.target.value)} />
-          <button className="btn" disabled={!email.includes('@')} onClick={run(() => sendMagicLink(email), 'Lien de connexion envoyé : ouvrez-le sur cet appareil.')}>
-            Recevoir un lien
-          </button>
-        </div>
+        <>
+          <div className="row">
+            <input
+              className="input"
+              style={{ flex: 1, minWidth: 200 }}
+              type="email"
+              inputMode="email"
+              autoComplete="email"
+              aria-label="Adresse e-mail pour la synchronisation"
+              placeholder="votre@email.fr"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+            />
+            <button className="btn" disabled={busy || !email.includes('@')} onClick={() => run(async () => (await sendMagicLink(email), 'Lien de connexion envoyé : ouvrez-le dans ce même navigateur.'))}>
+              Recevoir un lien
+            </button>
+          </div>
+          <p className="small muted" style={{ marginTop: 6 }}>
+            Ouvrez le lien reçu par e-mail dans le même navigateur que celui-ci, sinon la connexion échouera.
+          </p>
+        </>
       )}
-      {msg && <p className="small" style={{ marginTop: 8 }}>{msg}</p>}
+      {msg && (
+        <p className="small" role="status" style={{ marginTop: 8 }}>
+          {msg}
+        </p>
+      )}
+    </div>
+  )
+}
+
+function ThemeCard() {
+  const [theme, setThemeState] = useState<Theme>(getTheme())
+  return (
+    <div className="card">
+      <h2>Apparence</h2>
+      <label className="field">
+        <span>Thème</span>
+        <select
+          className="input"
+          value={theme}
+          onChange={(e) => {
+            const t = e.target.value as Theme
+            setTheme(t)
+            setThemeState(t)
+          }}
+        >
+          {(Object.keys(THEME_LABEL) as Theme[]).map((t) => (
+            <option key={t} value={t}>
+              {THEME_LABEL[t]}
+            </option>
+          ))}
+        </select>
+      </label>
     </div>
   )
 }
 
 export function SettingsPage({ garden }: { garden: Garden }) {
-  const [adding, setAdding] = useState(false)
+  const { newGarden } = useUi()
+  const [adding, setAdding] = useState(!!newGarden)
+  const addRef = useRef<HTMLDivElement>(null)
+
+  // Demande d'ouverture depuis le sélecteur d'en-tête ou le menu « Plus ».
+  useEffect(() => {
+    if (!newGarden) return
+    setAdding(true)
+    setUi({ newGarden: undefined })
+    addRef.current?.scrollIntoView({ block: 'start' })
+  }, [newGarden])
+
   return (
     <div className="page">
       <h1>Réglages</h1>
       <div className="grid cols-2" style={{ alignItems: 'start' }}>
         <div className="stack" style={{ gap: 12 }}>
           <GardenInfo garden={garden} />
-          <div className="card">
+          <div className="card" ref={addRef}>
             <h2>Ajouter un autre jardin</h2>
-            {adding ? <GardenCreator onDone={() => setAdding(false)} /> : <button className="btn" onClick={() => setAdding(true)}><Icon name="plus" /> Nouveau jardin</button>}
+            {adding ? (
+              <GardenCreator onDone={() => setAdding(false)} />
+            ) : (
+              <button className="btn" onClick={() => setAdding(true)}>
+                <Icon name="plus" /> Nouveau jardin
+              </button>
+            )}
           </div>
         </div>
         <div className="stack" style={{ gap: 12 }}>
           <Backup />
           <Sync />
+          <ThemeCard />
           <div className="card small">
             <h2>Sources et licences</h2>
             <ul className="list">

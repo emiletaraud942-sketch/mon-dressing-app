@@ -25,7 +25,7 @@ export default function View3D({ garden }: { garden: Garden }) {
   const [computing, setComputing] = useState(false)
   // Sol, orthophoto et carte d'ensoleillement couvrent la même emprise : parcelle + ~25 m de voisinage.
   const hasParcel = !!garden.parcel && garden.parcel.length > 2
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+  // Avec une parcelle, l'emprise ne dépend pas des plantes : on ne la recalcule pas à chaque déplacement.
   const frame = useMemo(() => gardenFrame(garden.parcel, plants), [garden.parcel, hasParcel ? null : plants])
   const halfSizeM = frame.halfSizeM
   const plantsKey = useMemo(() => plants.map((p) => `${p.id}:${p.position.x.toFixed(1)}:${p.position.y.toFixed(1)}`).join('|'), [plants])
@@ -44,7 +44,8 @@ export default function View3D({ garden }: { garden: Garden }) {
       setComputing(false)
     }, 50)
     return () => clearTimeout(t)
-  }, [sunMode, garden, plantsKey, halfSizeM]) // eslint-disable-line react-hooks/exhaustive-deps
+    // `plants` est résumé par plantsKey (positions arrondies) : inutile de recalculer pour un autre objet identique.
+  }, [sunMode, garden, plantsKey, halfSizeM])
 
   return (
     <div className="workspace">

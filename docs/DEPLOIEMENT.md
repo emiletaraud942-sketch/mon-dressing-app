@@ -69,7 +69,7 @@ Les « rappels » sont une notification **locale**, au plus une fois par jour, a
 - Chaque déploiement produit de nouveaux fichiers ; le service worker les télécharge en arrière-plan.
 - Le service worker est en mode « prompt » : la nouvelle version **attend**. L'appli affiche « Nouvelle version disponible — Recharger » ; elle ne recharge jamais la page sans prévenir (vous ne perdez pas de saisie). En cliquant, la nouvelle version prend la main et la page se recharge.
 - Si le bandeau n'apparaît pas : fermez complètement l'appli (et les autres onglets du site) puis rouvrez-la ; ou DevTools > Application > Service Workers > *Update* / *skipWaiting*.
-- Les gros fichiers (carte, 3D) ne sont pas préchargés à l'installation : ils sont gardés en cache à la première utilisation. Ouvrez une fois la carte et la 3D en ligne avant d'aller au jardin sans réseau. Les tuiles IGN déjà vues restent disponibles hors ligne.
+- Le gros fichier de la 3D (~230 ko compressés) n'est pas préchargé à l'installation : il est gardé en cache à la première ouverture de l'onglet 3D. Ouvrez la 3D une fois en ligne avant d'aller au jardin sans réseau. La carte, elle, est préchargée. Les tuiles IGN déjà vues restent disponibles hors ligne.
 
 ## 8. Quotas et licences
 - **Pl@ntNet** : 500 identifications par jour pour **toute** l'appli (clé gratuite partagée). L'appli limite aussi chaque visiteur (20 demandes / 10 min par instance). Au-delà : erreur 429, retour le lendemain.
