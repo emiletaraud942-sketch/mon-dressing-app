@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { lazy, Suspense, useMemo } from 'react'
 import { SPECIES, SPECIES_BY_ID } from '../../data/species'
 import { CATEGORY_LABEL, SUN_LABEL } from '../../data/labels'
 import { useGardenPlants } from '../../lib/store'
@@ -10,8 +10,9 @@ import { recommendSpecies, sunCategory } from '../../engine/planting'
 import { MONTH_NAMES, whatToSowNow } from '../../engine/calendar'
 import type { Category, Garden, Month, Species, XY } from '../../types'
 import { placePlant } from '../map/placing'
-import { SpotPicker } from './SpotPicker'
 import { scoreLabel } from './scoreLabel'
+
+const SpotPicker = lazy(() => import('./SpotPicker').then((m) => ({ default: m.SpotPicker })))
 
 function SpeciesChips({ list }: { list: Species[] }) {
   if (list.length === 0) return <p className="muted small">Rien ce mois-ci.</p>
@@ -87,7 +88,9 @@ function BestForSpot({ garden }: { garden: Garden }) {
     <div className="card">
       <h2>Quelle plante pour cet endroit ?</h2>
       <p className="small muted">Touchez un emplacement : l'appli calcule son ensoleillement réel (ombre des bâtiments et des arbres), sa pente, les voisins, et classe les espèces.</p>
-      <SpotPicker garden={garden} plants={plants} spot={spot} onPick={setSpot} />
+      <Suspense fallback={<div className="spot-map empty"><span className="spinner" /> Chargement de la carte…</div>}>
+        <SpotPicker garden={garden} plants={plants} spot={spot} onPick={setSpot} />
+      </Suspense>
       {analysis && spot && (
         <div style={{ marginTop: 12 }}>
           <div className="grid cols-3" style={{ gap: 8 }}>

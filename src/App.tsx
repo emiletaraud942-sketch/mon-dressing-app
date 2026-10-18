@@ -11,7 +11,6 @@ import { getLoadWarnings, getState, setActiveGarden, useActiveGarden, useStore }
 import { showToast } from './lib/toast'
 import { setUi, useUi, type Tab } from './lib/ui'
 import { Onboarding } from './features/settings/Onboarding'
-import { MapView } from './features/map/MapView'
 import { PlantsPage } from './features/plants/PlantsPage'
 import { TasksPage } from './features/tasks/TasksPage'
 import { useTasks } from './features/tasks/useTasks'
@@ -20,6 +19,13 @@ import { CataloguePage } from './features/plants/CataloguePage'
 import { SettingsPage } from './features/settings/SettingsPage'
 
 const View3D = lazy(() => import('./features/garden3d/View3D'))
+const MapView = lazy(() => import('./features/map/MapView').then((m) => ({ default: m.MapView })))
+
+const Loading = ({ label }: { label: string }) => (
+  <div className="empty">
+    <span className="spinner" /> {label}
+  </div>
+)
 
 /** `more` : l'entrée n'existe que dans le menu « Plus » sur téléphone (la barre du bas garde 5 entrées + Plus). */
 const NAV: { tab: Tab; label: string; icon: string; more?: boolean }[] = [
@@ -166,10 +172,14 @@ export function App() {
       </nav>
       <main className={'main' + (full ? ' full' : '')}>
         <ErrorBoundary inline resetKey={tab}>
-          {tab === 'carte' && <MapView garden={garden} />}
+          {tab === 'carte' && (
+            <Suspense fallback={<Loading label="Chargement de la carte…" />}>
+              <MapView garden={garden} />
+            </Suspense>
+          )}
           {tab === '3d' && (
             <ErrorBoundary inline resetKey={tab}>
-              <Suspense fallback={<div className="empty"><span className="spinner" /> Chargement de la 3D…</div>}>
+              <Suspense fallback={<Loading label="Chargement de la 3D…" />}>
                 <View3D garden={garden} />
               </Suspense>
             </ErrorBoundary>

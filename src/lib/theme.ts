@@ -13,10 +13,29 @@ export function getTheme(): Theme {
   }
 }
 
+/** Couleurs de la barre du navigateur (mêmes valeurs que les deux balises `theme-color` d'index.html). */
+const THEME_COLOR: Record<'light' | 'dark', string> = { light: '#2f5d3a', dark: '#141a14' }
+const FORCED_META = 'data-forced-theme-color'
+
+/** Thème forcé : une balise `theme-color` sans `media` l'emporte sur les deux balises d'index.html. Auto : on la retire. */
+function syncThemeColor(theme: Theme) {
+  const existing = document.head.querySelector(`meta[${FORCED_META}]`)
+  if (theme === 'auto') {
+    existing?.remove()
+    return
+  }
+  const meta = existing ?? document.createElement('meta')
+  meta.setAttribute('name', 'theme-color')
+  meta.setAttribute(FORCED_META, '')
+  meta.setAttribute('content', THEME_COLOR[theme])
+  if (!existing) document.head.prepend(meta)
+}
+
 export function applyTheme(theme: Theme) {
   const root = document.documentElement
   if (theme === 'auto') root.removeAttribute('data-theme')
   else root.setAttribute('data-theme', theme)
+  syncThemeColor(theme)
 }
 
 export function setTheme(theme: Theme) {

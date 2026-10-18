@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
 import type { User } from '@supabase/supabase-js'
+import type { SyncConflictError } from '../../lib/sync'
 import { Icon } from '../../components/Icon'
 import { Modal } from '../../components/Modal'
 import { exportCurrentState, lastExportAt, REMIND_EVERY_DAYS } from '../../lib/backup'
 import { getLoadWarnings, getState, removeGarden, replaceData, updateGarden, useGardenPlants, useStorageStatus, useStore } from '../../lib/store'
 import { migrateState, type StateData } from '../../lib/migrate'
-import { currentUser, pullSnapshot, pushSnapshot, sendMagicLink, signOut, syncAvailable, SyncConflictError } from '../../lib/sync'
 import { getTheme, setTheme, THEME_LABEL, type Theme } from '../../lib/theme'
 import { showToast } from '../../lib/toast'
 import { setUi, useUi } from '../../lib/ui'
@@ -240,41 +240,65 @@ function Backup() {
   )
 }
 
+type SyncModule = typeof import('../../lib/sync')
+const syncConfigured = !!import.meta.env.VITE_SUPABASE_URL && !!import.meta.env.VITE_SUPABASE_ANON_KEY
+
 function Sync() {
+  // supabase-js est chargé à l'ouverture des Réglages seulement (pas au démarrage de l'appli).
+  const [mod, setMod] = useState<SyncModule>()
   const [user, setUser] = useState<User | null>(null)
   const [email, setEmail] = useState('')
   const [msg, setMsg] = useState<string>()
   const [conflict, setConflict] = useState<SyncConflictError>()
   const [busy, setBusy] = useState(false)
   useEffect(() => {
-    currentUser().then(setUser, () => undefined)
+    if (!syncConfigured) return
+    let alive = true
+    import('../../lib/sync')
+      .then(async (m) => {
+        if (!alive) return
+        setMod(m)
+        setUser(await m.currentUser())
+      })
+      .catch(() => alive && setMsg('Le module de synchronisation n’a pas pu être chargé. Vérifiez votre connexion.'))
+    return () => {
+      alive = false
+    }
   }, [])
-  if (!syncAvailable()) return null
+  if (!syncConfigured) return null
+  if (!mod) {
+    return (
+      <div className="card">
+        <h2>Synchronisation entre appareils</h2>
+        {msg ? <p className="small">{msg}</p> : <p className="small muted"><span className="spinner" /> Chargement…</p>}
+      </div>
+    )
+  }
 
-  async function run(f: () => Promise<string | void>) {
+  async function run(f: (m: SyncModule) => Promise<string | void>) {
     setBusy(true)
     setMsg(undefined)
     try {
-      const ok = await f()
+      const ok = await f(mod!)
       if (ok) setMsg(ok)
     } catch (e) {
-      if (e instanceof SyncConflictError) setConflict(e)
+      if ((e as Error).name === 'SyncConflictError') setConflict(e as SyncConflictError)
       else setMsg((e as Error).message)
     } finally {
       setBusy(false)
     }
   }
   const push = (force = false) =>
-    run(async () => {
-      await pushSnapshot({ force })
+    run(async (m) => {
+      await m.pushSnapshot({ force })
       setConflict(undefined)
       return 'Données envoyées.'
     })
   const pull = () =>
-    run(async () => {
+    run(async (m) => {
       if (!confirm('Remplacer les données de cet appareil par celles en ligne ?')) return
       setConflict(undefined)
-      return (await pullSnapshot()) ? 'Données récupérées.' : 'Rien à récupérer : aucune sauvegarde en ligne.'
+      return (await m.pullSnapshot()) ? 'Données récupérées.' : 'Rien à récupérer : aucune sauvegarde en ligne.'
     })
 
   return (
@@ -290,7 +314,7 @@ function Sync() {
             <button className="btn" disabled={busy} onClick={pull}>
               Récupérer
             </button>
-            <button className="btn ghost" disabled={busy} onClick={() => run(async () => (await signOut(), setUser(null), 'Déconnecté.'))}>
+            <button className="btn ghost" disabled={busy} onClick={() => run(async (m) => (await m.signOut(), setUser(null), 'Déconnecté.'))}>
               Se déconnecter
             </button>
           </div>
@@ -325,7 +349,11 @@ function Sync() {
               value={email}
               onChange={(e) => setEmail(e.target.value)}
             />
-            <button className="btn" disabled={busy || !email.includes('@')} onClick={() => run(async () => (await sendMagicLink(email), 'Lien de connexion envoyé : ouvrez-le dans ce même navigateur.'))}>
+            <button
+              className="btn"
+              disabled={busy || !email.includes('@')}
+              onClick={() => run(async (m) => (await m.sendMagicLink(email), 'Lien de connexion envoyé : ouvrez-le dans ce même navigateur.'))}
+            >
               Recevoir un lien
             </button>
           </div>

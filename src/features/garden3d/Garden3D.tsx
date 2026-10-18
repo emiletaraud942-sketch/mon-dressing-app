@@ -113,6 +113,15 @@ function RecenterIcon() {
   )
 }
 
+function PinIcon() {
+  return (
+    <svg viewBox="0 0 20 20" width="20" height="20" aria-hidden="true">
+      <path d="M10 18s5.5-5.2 5.5-9.3a5.5 5.5 0 0 0-11 0C4.5 12.8 10 18 10 18z" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
+      <circle cx="10" cy="8.6" r="2" fill="currentColor" />
+    </svg>
+  )
+}
+
 const CARDINALS = ['N', 'NE', 'E', 'SE', 'S', 'SO', 'O', 'NO']
 function cardinal(deg: number) {
   return CARDINALS[Math.round(deg / 45) % 8]
@@ -467,30 +476,6 @@ export function Garden3D({
             </div>
           )}
 
-          {walking && (
-            <div className="g3d-walkactions">
-              <button
-                type="button"
-                className="g3d-btn"
-                title="Revenir à l’entrée du jardin"
-                onClick={() => setFitNonce((n) => n + 1)}
-              >
-                <RecenterIcon />
-                <span className="g3d-btn-text">Recentrer</span>
-              </button>
-              {hasSelection && (
-                <button
-                  type="button"
-                  className="g3d-btn"
-                  title="Se placer près de la plante sélectionnée, en la regardant"
-                  onClick={() => setGotoNonce((n) => n + 1)}
-                >
-                  Aller à cette plante
-                </button>
-              )}
-            </div>
-          )}
-
           <div className="g3d-bar">
             <div className="g3d-seg" role="group" aria-label="Mode de vue">
               {MODES.map((m) => (
@@ -506,15 +491,26 @@ export function Garden3D({
                 </button>
               ))}
             </div>
-            {!walking && (
+            <button
+              type="button"
+              className="g3d-btn g3d-btn--label g3d-recenter"
+              aria-label={walking ? 'Recentrer : revenir à l’entrée du jardin' : 'Recentrer sur le jardin'}
+              title={walking ? 'Recentrer : revenir à l’entrée du jardin' : 'Recentrer sur le jardin'}
+              onClick={() => setFitNonce((n) => n + 1)}
+            >
+              <RecenterIcon />
+              {walking && <span className="g3d-btn-text">Recentrer</span>}
+            </button>
+            {walking && hasSelection && (
               <button
                 type="button"
-                className="g3d-btn g3d-btn--icon g3d-recenter"
-                aria-label="Recentrer sur le jardin"
-                title="Recentrer sur le jardin"
-                onClick={() => setFitNonce((n) => n + 1)}
+                className="g3d-btn g3d-btn--label g3d-goto"
+                aria-label="Aller à cette plante"
+                title="Aller à cette plante : se placer près d’elle, en la regardant"
+                onClick={() => setGotoNonce((n) => n + 1)}
               >
-                <RecenterIcon />
+                <PinIcon />
+                <span className="g3d-btn-text">Aller à cette plante</span>
               </button>
             )}
           </div>

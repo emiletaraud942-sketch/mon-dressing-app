@@ -259,9 +259,27 @@ label:focus-within:has(> input.sr-only) {
   .brand span {
     display: none;
   }
+  /* Entrées de bureau seulement (Catalogue, Réglages) : sur téléphone, elles passent par « Plus ». */
   .hide-mobile {
     display: none !important;
   }
+  .show-mobile {
+    display: flex !important;
+  }
+  .navbtn {
+    min-height: 52px;
+    justify-content: center;
+  }
+  .garden-select {
+    max-width: 58vw;
+  }
+}
+.show-mobile {
+  display: none;
+}
+.garden-select {
+  width: auto;
+  max-width: 220px;
 }
 
 /* ---------- Composants ---------- */
@@ -341,6 +359,37 @@ label:focus-within:has(> input.sr-only) {
   min-height: 32px;
   padding: 4px 10px;
   font-size: 0.85rem;
+}
+.btn.small.tall {
+  min-height: 40px;
+}
+.btn.on {
+  background: var(--accent-soft);
+  border-color: var(--accent-2);
+  color: var(--accent);
+}
+.btn.icon-btn {
+  min-width: 40px;
+  padding: 4px;
+}
+.btn.small.icon-btn {
+  min-width: 36px;
+}
+.link-btn {
+  padding: 0 2px;
+  min-height: 40px;
+  color: var(--accent);
+  text-decoration: underline;
+}
+@media (max-width: 760px) {
+  /* Cibles tactiles : 36 px au minimum pour les petits boutons, 40 px pour les icônes seules. */
+  .btn.small {
+    min-height: 36px;
+  }
+  .btn.small.icon-btn {
+    min-width: 40px;
+    min-height: 40px;
+  }
 }
 .btn:disabled {
   opacity: 0.5;
@@ -451,6 +500,7 @@ label.field > span {
 .tabs button {
   border: 0;
   background: transparent;
+  min-height: 44px;
   padding: 8px 12px;
   border-bottom: 2px solid transparent;
   cursor: pointer;
@@ -464,7 +514,7 @@ label.field > span {
 }
 .months {
   display: grid;
-  grid-template-columns: 110px repeat(12, 1fr);
+  grid-template-columns: 110px repeat(12, minmax(0, 1fr));
   gap: 2px;
   font-size: 0.75rem;
   align-items: center;
@@ -494,6 +544,78 @@ label.field > span {
   text-align: center;
   color: var(--muted);
 }
+@media (max-width: 400px) {
+  .months {
+    grid-template-columns: 84px repeat(12, minmax(0, 1fr));
+    font-size: 0.7rem;
+  }
+}
+.legend {
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  margin: 8px 0 0;
+  padding: 0;
+  color: var(--muted);
+}
+.legend li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.swatch {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  flex: none;
+}
+.swatch.abri {
+  background: var(--cal-abri);
+}
+.swatch.default {
+  background: var(--accent-2);
+}
+.swatch.plant {
+  background: var(--accent);
+}
+.swatch.harvest {
+  background: var(--cal-harvest);
+}
+.swatch.now {
+  background: transparent;
+  outline: 2px solid var(--text);
+  outline-offset: -2px;
+}
+.swatch.line {
+  height: 0;
+  border: 0;
+  border-top: 3px solid;
+  border-radius: 0;
+  background: none;
+  width: 18px;
+}
+.swatch.line.parcel {
+  border-color: var(--parcel);
+  box-shadow: 0 0 0 1px #0006;
+}
+.swatch.disc {
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--accent-2) 40%, transparent);
+  border-color: var(--accent-2);
+}
+.swatch.dashed {
+  border-radius: 50%;
+  border: 2px dashed var(--accent-2);
+  background: transparent;
+}
+.swatch.building {
+  background: #ffffff55;
+  border-color: var(--muted);
+}
 .empty {
   text-align: center;
   padding: 40px 16px;
@@ -505,6 +627,46 @@ label.field > span {
   object-fit: cover;
   border-radius: 8px;
   border: 1px solid var(--border);
+  background: var(--surface-2);
+  flex: none;
+}
+.photo-thumb.missing {
+  border-style: dashed;
+}
+.photo-btn {
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: zoom-in;
+  border-radius: 8px;
+  line-height: 0;
+}
+.photo-large {
+  display: block;
+  max-width: 100%;
+  max-height: 70vh;
+  margin: 0 auto;
+  border-radius: 8px;
+}
+.photo-add {
+  height: 72px;
+  width: 72px;
+  flex-direction: column;
+  gap: 2px;
+}
+.photo-remove {
+  position: absolute;
+  top: -8px;
+  right: -8px;
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  cursor: pointer;
 }
 .scorebar {
   height: 8px;
@@ -516,6 +678,15 @@ label.field > span {
 .scorebar > div {
   height: 100%;
   background: var(--accent-2);
+}
+.scorebar.neutral > div {
+  background: var(--warn);
+}
+.scorebar.danger > div {
+  background: var(--danger);
+}
+.warn-text {
+  color: var(--warn-text);
 }
 .spinner {
   width: 18px;
@@ -550,6 +721,10 @@ label.field > span {
   border-left: 1px solid var(--border);
   overflow: auto;
   padding: 16px;
+  min-width: 0;
+}
+.sheet-handle {
+  display: none;
 }
 @media (max-width: 760px) {
   .workspace {
@@ -560,6 +735,64 @@ label.field > span {
     border-left: 0;
     border-top: 1px solid var(--border);
     max-height: 38%;
+    border-radius: 16px 16px 0 0;
+    padding-top: 4px;
+    box-shadow: 0 -2px 12px rgb(0 0 0 / 12%);
+    position: relative;
+    z-index: 4;
+  }
+  /* Volet du bas extensible : poignée + 3 hauteurs (38 %, 70 %, 100 %). */
+  .sidepanel[data-snap='70'] {
+    max-height: 70%;
+    height: 70%;
+  }
+  .sidepanel[data-snap='100'] {
+    max-height: 100%;
+    height: 100%;
+  }
+  .sheet-handle {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    width: 100%;
+    min-height: 28px;
+    margin-bottom: 4px;
+    border: 0;
+    background: transparent;
+    cursor: pointer;
+    position: sticky;
+    top: 0;
+    z-index: 1;
+  }
+  .sheet-handle span {
+    width: 44px;
+    height: 5px;
+    border-radius: 3px;
+    background: var(--border);
+    border: 1px solid var(--muted);
+  }
+}
+/* Téléphone en paysage : écran large mais très bas. Navigation et panneau latéral réduits. */
+@media (min-width: 761px) and (max-height: 500px) {
+  .app {
+    grid-template-columns: 150px 1fr;
+    grid-template-rows: 46px 1fr;
+  }
+  .topbar {
+    padding: 0 10px;
+  }
+  .sidenav {
+    padding: 6px 4px;
+    overflow-y: auto;
+  }
+  .navbtn {
+    padding: 6px 8px;
+    gap: 8px;
+    font-size: 0.9rem;
+  }
+  .sidepanel {
+    width: 250px;
+    padding: 10px;
   }
 }
 .floating {
@@ -571,24 +804,120 @@ label.field > span {
   box-shadow: var(--shadow);
   padding: 8px;
 }
+/* Consigne de placement : en bas de la zone carte, sur plusieurs lignes si besoin. */
 .placing-banner {
-  top: 12px;
+  bottom: 36px;
   left: 50%;
   transform: translateX(-50%);
   display: flex;
   align-items: center;
+  gap: 10px;
+  white-space: normal;
+  width: max-content;
+  max-width: calc(100% - 24px);
+}
+.placing-banner .placing-text {
+  min-width: 0;
+  line-height: 1.3;
+}
+.placing-banner .btn {
+  flex: none;
+}
+/* Barre d'outils et avis de la carte : colonne en haut, sans gêner les commandes de zoom (à droite). */
+.map-top {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  right: 12px;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
   gap: 8px;
-  white-space: nowrap;
+  pointer-events: none;
+}
+.map-top > * {
+  pointer-events: auto;
+  position: static;
+  max-width: 100%;
+}
+.map-toolbar {
+  gap: 4px;
+  padding: 4px;
+  flex-wrap: wrap;
+}
+.map-toolbar .short {
+  display: none;
+}
+@media (min-width: 761px) {
+  .map-top {
+    right: 56px;
+  }
+}
+@media (max-width: 760px) {
+  .map-toolbar .long {
+    display: none;
+  }
+  .map-toolbar .short {
+    display: inline;
+  }
+  .map-toolbar .btn.small {
+    padding: 4px 8px;
+  }
+}
+.map-top .legend {
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  color: var(--text);
+}
+.map-notice {
+  margin: 0;
+  box-shadow: var(--shadow);
+}
+.data-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 12px;
+  box-shadow: var(--shadow);
+}
+.data-banner.compact {
+  margin: 0;
+  font-size: 0.85rem;
+}
+.data-banner .btn {
+  flex: none;
 }
 .map {
   position: absolute;
   inset: 0;
 }
+.marker-hit {
+  /* Zone tactile de 40 px autour du point visible (14 px). */
+  width: 40px;
+  height: 40px;
+  display: grid;
+  place-items: center;
+  background: transparent;
+  cursor: grab;
+  border-radius: 50%;
+}
+.marker-hit:focus-visible {
+  outline: 2px solid #ffd54a;
+}
+/* En mode placement, seule la pastille reste cliquable : on peut poser une plante tout près d'une autre. */
+.placing .marker-hit {
+  pointer-events: none;
+}
+.placing .marker-hit .map-marker {
+  pointer-events: auto;
+}
 .map-marker {
   border-radius: 50%;
   border: 2px solid #fff;
   box-shadow: 0 1px 4px rgb(0 0 0 / 45%);
-  cursor: grab;
 }
 .map-marker.selected {
   border-color: #ffd54a;
@@ -610,6 +939,7 @@ dialog.modal {
   padding: 0;
   width: min(560px, calc(100vw - 32px));
   max-height: calc(100vh - 48px);
+  max-height: calc(100dvh - 48px);
   background: var(--surface);
   color: var(--text);
   box-shadow: var(--shadow);
@@ -631,6 +961,27 @@ dialog.modal::backdrop {
   padding: 16px;
   overflow: auto;
   max-height: calc(100vh - 160px);
+  max-height: calc(100dvh - 160px);
+}
+@media (max-width: 760px) {
+  dialog.modal.sheet {
+    margin: auto 0 0;
+    width: 100%;
+    max-width: 100%;
+    border-radius: 16px 16px 0 0;
+    border-bottom: 0;
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+}
+.more-item {
+  justify-content: flex-start;
+  min-height: 52px;
+  font-size: 1.05rem;
+  width: 100%;
+}
+.more-item[aria-current='page'] {
+  background: var(--accent-soft);
+  color: var(--accent);
 }
 
 /* ---------- Onboarding ---------- */
@@ -651,13 +1002,26 @@ dialog.modal::backdrop {
   border-radius: 10px;
   overflow: hidden;
 }
+.suggestions[hidden] {
+  display: none;
+}
 .suggestions button {
   width: 100%;
+  min-height: 44px;
   text-align: left;
   border: 0;
   background: var(--surface);
   padding: 10px 12px;
   cursor: pointer;
+}
+.input-wrap {
+  position: relative;
+}
+.input-spinner {
+  position: absolute;
+  right: 12px;
+  top: 50%;
+  margin-top: -9px;
 }
 .suggestions li + li button {
   border-top: 1px solid var(--border);
@@ -676,11 +1040,25 @@ dialog.modal::backdrop {
   align-items: center;
   padding: 4px 0;
 }
+.step-icon {
+  width: 18px;
+  text-align: center;
+  flex: none;
+  font-weight: 700;
+}
 .weather-strip {
   display: grid;
-  grid-template-columns: repeat(7, minmax(60px, 1fr));
-  gap: 6px;
-  overflow-x: auto;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 4px;
+}
+@media (max-width: 480px) {
+  .weather-day {
+    font-size: 0.7rem;
+    padding: 6px 2px;
+  }
+  .weather-day strong {
+    font-size: 0.85rem;
+  }
 }
 .weather-day {
   text-align: center;
@@ -702,21 +1080,135 @@ dialog.modal::backdrop {
   font-size: 0.95rem;
 }
 .task {
+  padding-right: 0;
+}
+/* Toute la ligne est un <label> : on coche en touchant n'importe où sur le texte. */
+.task-main {
   display: flex;
   gap: 12px;
   align-items: flex-start;
+  min-height: 44px;
+  cursor: pointer;
 }
-.task input[type='checkbox'] {
-  width: 22px;
-  height: 22px;
-  margin-top: 2px;
+.task-main input[type='checkbox'] {
+  width: 28px;
+  height: 28px;
+  margin: 6px 6px 6px 2px;
   accent-color: var(--accent);
   flex: none;
+}
+.task-plants {
+  gap: 4px;
+  margin: 2px 0 0 46px;
 }
 .task.done .task-title {
   text-decoration: line-through;
   color: var(--muted);
 }
-.task.blocked {
+.task.blocked,
+.task.weather-pending {
   opacity: 0.75;
+}
+.task.weather-pending {
+  opacity: 0.55;
+}
+.check {
+  width: 24px;
+  height: 24px;
+  accent-color: var(--accent);
+  flex: none;
+}
+.file-btn {
+  cursor: pointer;
+}
+.catalogue-grid {
+  grid-template-columns: minmax(220px, 320px) 1fr;
+  align-items: start;
+}
+.catalogue-list {
+  max-height: 70vh;
+  overflow: auto;
+  padding: 8px;
+}
+.sheet-card {
+  scroll-margin-top: 8px;
+}
+.spot-map {
+  height: 320px;
+  border-radius: var(--radius);
+  overflow: hidden;
+  position: relative;
+}
+
+/* ---------- Messages : bandeaux et toasts ---------- */
+.overlay-stack {
+  position: fixed;
+  top: 60px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(560px, calc(100% - 16px));
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  pointer-events: none;
+}
+.overlay-stack > * {
+  pointer-events: auto;
+  margin: 0;
+  box-shadow: var(--shadow);
+}
+.banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.toast-host {
+  position: fixed;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: 16px;
+  width: min(520px, calc(100% - 16px));
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  pointer-events: none;
+}
+@media (max-width: 760px) {
+  .toast-host {
+    bottom: calc(var(--nav-h) + 8px + env(safe-area-inset-bottom));
+  }
+}
+.toast {
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 6px 6px 14px;
+  border-radius: var(--radius);
+  background: var(--text);
+  color: var(--bg);
+  box-shadow: var(--shadow);
+}
+.toast.error {
+  background: var(--danger);
+  color: var(--surface);
+}
+.toast-msg {
+  flex: 1;
+  min-width: 0;
+}
+.toast .btn {
+  color: inherit;
+  background: transparent;
+  border-color: currentcolor;
+}
+.toast .btn.ghost {
+  border-color: transparent;
+}
+.error-screen .card {
+  text-align: center;
 }

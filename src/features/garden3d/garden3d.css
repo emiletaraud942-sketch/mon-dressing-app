@@ -204,12 +204,6 @@
 .g3d-btn-text {
   margin-left: 6px;
 }
-.g3d-walkactions {
-  display: flex;
-  justify-content: center;
-  flex-wrap: wrap;
-  gap: 8px;
-}
 .g3d-btn--small {
   padding: 0 8px;
   font-size: 12.5px;
@@ -230,6 +224,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
+  flex-wrap: wrap;
   gap: 8px;
 }
 .g3d-seg {
@@ -418,6 +413,14 @@
 }
 
 @media (max-width: 480px) {
+  /* Écran étroit : les boutons d'action de la Promenade n'affichent que l'icône (nom en aria-label et title). */
+  .g3d-btn.g3d-btn--label {
+    padding: 0;
+    width: 40px;
+  }
+  .g3d-btn--label .g3d-btn-text {
+    display: none;
+  }
   .g3d-root {
     font-size: 13px;
   }

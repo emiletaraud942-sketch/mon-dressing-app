@@ -87,31 +87,20 @@ export function WalkRig({ shared, parcel, bounds, colliders, sample, visuals, se
   live.current = { parcel, bounds, colliders, sample, visuals, selectedPlantId }
 
   // Rendu à la demande : une image seulement quand quelque chose bouge (touche, joystick, regard, lissage de hauteur).
+  // La simulation tourne à chaque passage de la boucle ; le dessin, lui, est plafonné (60 images/s, 45 en tactile)
+  // par le rendu manuel plus bas : trop tôt → on saute le dessin et on redemande une passe au vsync suivant.
   const pacer = useMemo(() => createFramePacer(COARSE ? MAX_FPS_COARSE : MAX_FPS), [])
-  const raf = useRef(0)
   const wasActive = useRef(false)
   const limitHit = useRef(false)
   const limitShown = useRef(false)
   const onLimitRef = useRef(onLimit)
   onLimitRef.current = onLimit
-  /** Demande l'image suivante en respectant le plafond d'images par seconde. */
-  const requestPaced = useCallback(() => {
-    if (raf.current) return
-    const loop = () => {
-      raf.current = 0
-      if (pacer.due(performance.now())) invalidate()
-      else raf.current = requestAnimationFrame(loop)
-    }
-    raf.current = requestAnimationFrame(loop)
-  }, [pacer, invalidate])
   useEffect(() => {
-    shared.wake = requestPaced
+    shared.wake = invalidate // le joystick réveille la boucle
     return () => {
       shared.wake = undefined
-      if (raf.current) cancelAnimationFrame(raf.current)
-      raf.current = 0
     }
-  }, [shared, requestPaced])
+  }, [shared, invalidate])
 
   const applyPose = useCallback(
     (w: Walker, pitch: number) => {
@@ -167,14 +156,14 @@ export function WalkRig({ shared, parcel, bounds, colliders, sample, visuals, se
         // Le relâchement compte toujours : sinon une touche resterait « enfoncée » si le focus change entre-temps.
         if (k[action]) {
           k[action] = false
-          requestPaced()
+          invalidate()
         }
         return
       }
       if (e.ctrlKey || e.metaKey || e.altKey || walkKeyBlocked(e.target as KeyTarget | null, e.key)) return
       k[action] = true
       e.preventDefault()
-      requestPaced()
+      invalidate()
     }
     const down = onKey(true)
     const up = onKey(false)
@@ -190,7 +179,7 @@ export function WalkRig({ shared, parcel, bounds, colliders, sample, visuals, se
       window.removeEventListener('blur', clear)
       clear()
     }
-  }, [requestPaced])
+  }, [invalidate])
 
   // Regarder en glissant (souris ou doigt) ; un simple clic / toucher reste une sélection.
   useEffect(() => {
@@ -217,7 +206,7 @@ export function WalkRig({ shared, parcel, bounds, colliders, sample, visuals, se
       p.yaw -= dx * LOOK_SENS
       p.pitch = Math.max(-PITCH_LIMIT, Math.min(PITCH_LIMIT, p.pitch - dy * LOOK_SENS))
       el.style.cursor = 'grabbing'
-      requestPaced()
+      invalidate()
     }
     const onUp = (e: PointerEvent) => {
       if (!look.current || look.current.id !== e.pointerId) return
@@ -229,7 +218,7 @@ export function WalkRig({ shared, parcel, bounds, colliders, sample, visuals, se
         /* déjà relâché */
       }
       tick.current = SLOW_TICK_S // étiquettes et détails à jour pour la direction finale du regard
-      requestPaced()
+      invalidate()
     }
     const noMenu = (e: Event) => e.preventDefault()
     el.addEventListener('pointerdown', onDown)
@@ -246,7 +235,7 @@ export function WalkRig({ shared, parcel, bounds, colliders, sample, visuals, se
       el.style.cursor = prevCursor
       look.current = null
     }
-  }, [gl, shared, requestPaced])
+  }, [gl, shared, invalidate])
 
   // Quitte le mode : repasse en rendu à la demande après une dernière image.
   useEffect(() => () => invalidate(), [invalidate])
@@ -335,9 +324,19 @@ export function WalkRig({ shared, parcel, bounds, colliders, sample, visuals, se
         }
       }
     }
-    pacer.mark(performance.now())
-    if (active) requestPaced()
-  })
+    if (active) invalidate()
+  }, -1)
+
+  // Dessin manuel (priorité > 0 : R3F ne dessine plus lui-même) avec plafond d'images par seconde.
+  useFrame((state) => {
+    const now = performance.now()
+    if (!pacer.due(now)) {
+      state.invalidate() // trop tôt : on réessaie au vsync suivant
+      return
+    }
+    pacer.mark(now)
+    state.gl.render(state.scene, state.camera)
+  }, 1)
 
   return (
     <>
