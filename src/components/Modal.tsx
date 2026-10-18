@@ -1,17 +1,41 @@
 import { useEffect, useRef, type ReactNode } from 'react'
 import { Icon } from './Icon'
 
-export function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) {
+/**
+ * Boîte de dialogue native (`<dialog>`) : piège le focus, se ferme avec Échap, rend le focus à l'élément
+ * qui l'a ouverte. `onClose` n'est appelée qu'une fois, quelle que soit la façon de fermer.
+ * `sheet` : sur mobile, la boîte se colle en bas de l'écran.
+ */
+export function Modal({ title, onClose, children, sheet }: { title: string; onClose: () => void; children: ReactNode; sheet?: boolean }) {
   const ref = useRef<HTMLDialogElement>(null)
+  const onCloseRef = useRef(onClose)
+  onCloseRef.current = onClose
+
   useEffect(() => {
     const d = ref.current
+    const opener = document.activeElement as HTMLElement | null
     if (d && !d.open) d.showModal()
+    return () => {
+      // Le démontage retire le <dialog> du DOM : on rend le focus à l'élément d'origine.
+      if (opener && opener.isConnected && typeof opener.focus === 'function') opener.focus()
+    }
   }, [])
+
+  const titleId = useRef('modal-' + Math.random().toString(36).slice(2, 8)).current
   return (
-    <dialog ref={ref} className="modal" onClose={onClose} onCancel={onClose}>
+    <dialog
+      ref={ref}
+      className={'modal' + (sheet ? ' sheet' : '')}
+      aria-labelledby={titleId}
+      onClose={() => onCloseRef.current()}
+      onClick={(e) => {
+        // Clic sur le fond (hors du contenu) : ferme.
+        if (e.target === ref.current) ref.current?.close()
+      }}
+    >
       <div className="modal-head">
-        <h2>{title}</h2>
-        <button className="btn ghost small" onClick={onClose} aria-label="Fermer">
+        <h2 id={titleId}>{title}</h2>
+        <button className="btn ghost small icon-btn" onClick={() => ref.current?.close()} aria-label="Fermer">
           <Icon name="x" />
         </button>
       </div>

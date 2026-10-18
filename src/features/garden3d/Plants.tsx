@@ -1,9 +1,10 @@
 // Rendu instancié des plantes : une InstancedMesh par type de pièce et par opacité,
 // soit au plus 14 appels de dessin (7 types de pièces) quel que soit le nombre de plantes.
-import { useEffect, useLayoutEffect, useMemo } from 'react'
+import { forwardRef, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef } from 'react'
 import * as THREE from 'three'
 import { useThree, type ThreeEvent } from '@react-three/fiber'
 import { PART_KINDS, partGeometries, type PartKind, type PlantPart } from './plantModel'
+import { ownerIndex, translatedMatrix } from './drag'
 
 export interface PlantPointerHandlers {
   onDown: (id: string, e: ThreeEvent<PointerEvent>) => void
@@ -12,7 +13,22 @@ export interface PlantPointerHandlers {
   onOut: (id: string, e: ThreeEvent<PointerEvent>) => void
 }
 
+/** Contrôle impératif des plantes : déplace une plante sans reconstruire la scène (glisser-déposer). */
+export interface PlantsHandle {
+  /** Décale toutes les pièces de la plante par rapport à leur position calculée ; (0, 0, 0) les remet en place. */
+  offsetOwner: (id: string, dx: number, dy: number, dz: number) => void
+}
+interface LayerHandle {
+  offset: (id: string, dx: number, dy: number, dz: number) => void
+}
+
+// Matériaux partagés par toutes les couches ; libérés au démontage de la vue 3D, recréés à la demande.
 let materials: Record<string, THREE.MeshStandardMaterial> | null = null
+export function disposePlantMaterials(): void {
+  if (!materials) return
+  for (const m of Object.values(materials)) m.dispose()
+  materials = null
+}
 function getMaterial(kind: PartKind, transparent: boolean): THREE.MeshStandardMaterial {
   if (!materials) materials = {}
   const key = kind + (transparent ? '-t' : '-o')
@@ -45,11 +61,13 @@ function Layer({
   transparent,
   parts,
   handlers,
+  register,
 }: {
   kind: PartKind
   transparent: boolean
   parts: PlantPart[]
   handlers: PlantPointerHandlers
+  register: (key: string, h: LayerHandle | null) => void
 }) {
   const invalidate = useThree((s) => s.invalidate)
   const capacity = nextCapacity(parts.length)
@@ -76,8 +94,28 @@ function Layer({
     mesh.instanceMatrix.needsUpdate = true
     if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true
     mesh.computeBoundingSphere()
+    mesh.frustumCulled = true
     invalidate()
   }, [mesh, parts, invalidate])
+
+  // Glisser-déposer : on ne réécrit que les matrices des pièces de la plante déplacée.
+  const index = useMemo(() => ownerIndex(parts), [parts])
+  useEffect(() => {
+    const tmp = new THREE.Matrix4()
+    const key = kind + (transparent ? '-t' : '-o')
+    register(key, {
+      offset: (id, dx, dy, dz) => {
+        const list = index.get(id)
+        if (!list) return
+        for (const i of list) mesh.setMatrixAt(i, translatedMatrix(parts[i].matrix, dx, dy, dz, tmp))
+        mesh.instanceMatrix.needsUpdate = true
+        // La sphère englobante date du dernier calcul complet : tant qu'une plante est décalée, pas de culling.
+        mesh.frustumCulled = dx === 0 && dy === 0 && dz === 0
+        invalidate()
+      },
+    })
+    return () => register(key, null)
+  }, [mesh, parts, index, kind, transparent, register, invalidate])
 
   const owner = (e: { instanceId?: number }) => (e.instanceId != null ? parts[e.instanceId]?.owner : undefined)
   const casts = !transparent && kind !== 'dot' && kind !== 'tuft'
@@ -107,7 +145,24 @@ function Layer({
   )
 }
 
-export function Plants({ parts, handlers }: { parts: PlantPart[]; handlers: PlantPointerHandlers }) {
+export const Plants = forwardRef<PlantsHandle, { parts: PlantPart[]; handlers: PlantPointerHandlers }>(function Plants({ parts, handlers }, ref) {
+  const layers = useRef(new Map<string, LayerHandle>())
+  const register = useMemo(
+    () => (key: string, h: LayerHandle | null) => {
+      if (h) layers.current.set(key, h)
+      else layers.current.delete(key)
+    },
+    [],
+  )
+  useImperativeHandle(
+    ref,
+    () => ({
+      offsetOwner: (id, dx, dy, dz) => {
+        for (const l of layers.current.values()) l.offset(id, dx, dy, dz)
+      },
+    }),
+    [],
+  )
   const groups = useMemo(() => {
     const g: Record<string, PlantPart[]> = {}
     for (const k of PART_KINDS) {
@@ -123,9 +178,9 @@ export function Plants({ parts, handlers }: { parts: PlantPart[]; handlers: Plan
         [false, true].map((t) => {
           const list = groups[k + (t ? '-t' : '-o')]
           if (!list.length) return null
-          return <Layer key={k + (t ? '-t' : '-o')} kind={k} transparent={t} parts={list} handlers={handlers} />
+          return <Layer key={k + (t ? '-t' : '-o')} kind={k} transparent={t} parts={list} handlers={handlers} register={register} />
         }),
       )}
     </group>
   )
-}
+})

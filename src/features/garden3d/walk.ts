@@ -2,15 +2,15 @@
 // Repère local : x = est, y = nord (m). Lacet (yaw) = 0 : on regarde vers le nord ; positif = vers l'ouest (sens trigonométrique vu de dessus).
 // Three.js : X = est, Y = haut, Z = -nord.
 import type { Building, XY } from '../../types'
-import type { Bounds } from './framing'
+import { CONTEXT_M, type Bounds } from './framing'
 import type { HeightSampler } from './terrain'
 
 export const EYE_HEIGHT_M = 1.65
 export const WALK_SPEED = 1.4
 export const RUN_SPEED = 3
 export const WALKER_RADIUS_M = 0.35
-/** Distance maximale autorisée au-delà de l'emprise de la parcelle. */
-export const MAX_OUTSIDE_M = 40
+/** Distance maximale autorisée au-delà de l'emprise de la parcelle : le voisinage visible (sol et orthophoto). */
+export const MAX_OUTSIDE_M = CONTEXT_M
 export const TURN_SPEED = 1.8 // rad/s au clavier
 export const PITCH_LIMIT = 1.25
 export const WALK_FOV_DEG = 65
@@ -144,12 +144,24 @@ export function resolveCollisions(p: XY, r: number, colliders: Collider[], passe
   return cur
 }
 
-/** Reste dans l'emprise de la parcelle élargie de maxOutsideM. */
-export function clampToBounds(p: XY, bounds: Bounds, maxOutsideM = MAX_OUTSIDE_M): XY {
-  return {
-    x: Math.min(bounds.maxX + maxOutsideM, Math.max(bounds.minX - maxOutsideM, p.x)),
-    y: Math.min(bounds.maxY + maxOutsideM, Math.max(bounds.minY - maxOutsideM, p.y)),
-  }
+/**
+ * Reste dans l'emprise de la parcelle élargie de maxOutsideM.
+ * Si `from` (position actuelle) est déjà dehors parce que l'emprise a changé, on ne la déplace pas :
+ * elle peut rester là ou revenir, pas s'enfoncer plus loin.
+ */
+export function clampToBounds(p: XY, bounds: Bounds, maxOutsideM = MAX_OUTSIDE_M, from?: XY): XY {
+  const x0 = Math.min(bounds.minX - maxOutsideM, from ? from.x : Infinity)
+  const x1 = Math.max(bounds.maxX + maxOutsideM, from ? from.x : -Infinity)
+  const y0 = Math.min(bounds.minY - maxOutsideM, from ? from.y : Infinity)
+  const y1 = Math.max(bounds.maxY + maxOutsideM, from ? from.y : -Infinity)
+  return { x: Math.min(x1, Math.max(x0, p.x)), y: Math.min(y1, Math.max(y0, p.y)) }
+}
+
+/** Reste sur le sol réel : carré de côté 2·halfM centré sur l'origine (même règle de non-téléportation). */
+export function clampToGround(p: XY, halfM: number, from?: XY): XY {
+  const lx = Math.max(halfM, from ? Math.abs(from.x) : 0)
+  const ly = Math.max(halfM, from ? Math.abs(from.y) : 0)
+  return { x: Math.min(lx, Math.max(-lx, p.x)), y: Math.min(ly, Math.max(-ly, p.y)) }
 }
 
 /** Hauteur des yeux au-dessus du niveau de la mer relatif du jardin : relief + 1,65 m. */
@@ -161,7 +173,12 @@ export interface WalkWorld {
   colliders: Collider[]
   bounds: Bounds
   maxOutsideM?: number
+  /** Demi-côté (m) du sol texturé : la marche s'arrête à son bord. */
+  groundHalfM?: number
 }
+
+/** Résultat d'un pas : `limited` vaut vrai quand la limite du jardin a retenu le promeneur. */
+export type WalkStep = Walker & { limited: boolean }
 
 /** Vecteur « avant » du promeneur dans le repère local (x est, y nord). */
 export function forwardOf(yaw: number): XY {
@@ -169,7 +186,7 @@ export function forwardOf(yaw: number): XY {
 }
 
 /** Avance le promeneur de dt secondes. */
-export function stepWalker(w: Walker, input: WalkInput, dt: number, world: WalkWorld): Walker {
+export function stepWalker(w: Walker, input: WalkInput, dt: number, world: WalkWorld): WalkStep {
   const step = Math.min(0.1, Math.max(0, dt))
   const yaw = w.yaw + input.turn * TURN_SPEED * step
   const f = forwardOf(yaw)
@@ -184,8 +201,11 @@ export function stepWalker(w: Walker, input: WalkInput, dt: number, world: WalkW
   const speed = input.run ? RUN_SPEED : WALK_SPEED
   let p: XY = { x: w.x + vx * speed * step, y: w.y + vy * speed * step }
   p = resolveCollisions(p, WALKER_RADIUS_M, world.colliders)
-  p = clampToBounds(p, world.bounds, world.maxOutsideM ?? MAX_OUTSIDE_M)
-  return { x: p.x, y: p.y, yaw }
+  const from: XY = { x: w.x, y: w.y }
+  let q = clampToBounds(p, world.bounds, world.maxOutsideM ?? MAX_OUTSIDE_M, from)
+  if (world.groundHalfM != null) q = clampToGround(q, world.groundHalfM, from)
+  const limited = Math.abs(q.x - p.x) > 1e-6 || Math.abs(q.y - p.y) > 1e-6
+  return { x: q.x, y: q.y, yaw, limited }
 }
 
 /** Lacet pour regarder de `from` vers `to`. */
@@ -284,10 +304,81 @@ export interface WalkShared {
   joy: { x: number; y: number }
   /** Bouton « Courir » tactile. */
   run: boolean
+  /** Demande une image (rendu à la demande) : posé par WalkRig, appelé par le joystick et « Courir ». */
+  wake?: () => void
   /** Une pose est mémorisée (reprise de la promenade). */
   saved: boolean
 }
 
 export function createWalkShared(): WalkShared {
   return { pose: { x: 0, y: 0, yaw: 0, pitch: 0 }, eyeY: EYE_HEIGHT_M, joy: { x: 0, y: 0 }, run: false, saved: false }
+}
+
+// ---------- Clavier : quelles touches marchent ----------
+
+/** Ce dont `isTextEntry` a besoin d'un élément du DOM (testable sans navigateur). */
+export interface KeyTarget {
+  tagName?: string
+  type?: string
+  isContentEditable?: boolean
+}
+
+const TEXT_INPUT_TYPES = new Set(['text', 'search', 'email', 'number', 'password', 'tel', 'url', 'date', 'time', 'datetime-local', 'month', 'week'])
+
+/** Vrai pour un champ où l'on tape du texte (la marche ne doit pas voler ces touches). */
+export function isTextEntry(el: KeyTarget | null | undefined): boolean {
+  const tag = el?.tagName?.toUpperCase()
+  if (!el || !tag) return false
+  if (el.isContentEditable) return true
+  if (tag === 'TEXTAREA' || tag === 'SELECT') return true
+  if (tag === 'INPUT') return TEXT_INPUT_TYPES.has((el.type ?? 'text').toLowerCase())
+  return false
+}
+
+/**
+ * Vrai si la touche doit rester à l'élément ciblé : champ de texte, ou flèches sur un curseur (range) / bouton radio.
+ * Un curseur, une case ou un bouton n'empêchent pas la marche au clavier (ZQSD, WASD).
+ */
+export function walkKeyBlocked(el: KeyTarget | null | undefined, key: string): boolean {
+  if (isTextEntry(el)) return true
+  if (el?.tagName?.toUpperCase() === 'INPUT') {
+    const t = (el.type ?? '').toLowerCase()
+    if ((t === 'range' || t === 'radio') && key.startsWith('Arrow')) return true
+  }
+  return false
+}
+
+// ---------- Rendu à la demande ----------
+
+/** Écart de hauteur des yeux (m) en dessous duquel le lissage est considéré comme terminé. */
+export const EYE_SETTLE_M = 0.0008
+const INPUT_DEADZONE = 1e-3
+
+export function isWalkMoving(i: WalkInput): boolean {
+  return Math.abs(i.forward) > INPUT_DEADZONE || Math.abs(i.strafe) > INPUT_DEADZONE || Math.abs(i.turn) > INPUT_DEADZONE
+}
+
+/** Faut-il demander une image de plus ? Oui tant qu'on bouge ou que la hauteur des yeux n'a pas convergé. */
+export function walkNeedsFrames(i: WalkInput, eyeGap: number): boolean {
+  return isWalkMoving(i) || Math.abs(eyeGap) > EYE_SETTLE_M
+}
+
+/**
+ * Plafond d'images par seconde pour une boucle qui redessine à chaque vsync.
+ * Cadence sur une grille de `1000/maxFps` ms avec rattrapage : 45 images/s sur un écran 60 Hz font
+ * 45 en moyenne (3 images sur 4), pas 30.
+ */
+export function createFramePacer(maxFps: number) {
+  const interval = 1000 / maxFps
+  const tolerance = 2 // ms : un vsync légèrement en avance compte comme dû
+  let next = -Infinity
+  return {
+    interval,
+    due(now: number): boolean {
+      return now >= next - tolerance
+    },
+    mark(now: number): void {
+      next = next === -Infinity || now - next > interval ? now + interval : next + interval
+    },
+  }
 }

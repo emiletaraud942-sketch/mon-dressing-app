@@ -260,3 +260,18 @@ export function fitPerspective(
   const position: [number, number, number] = [target[0] + dir.x * d, target[1] + dir.y * d, target[2] + dir.z * d]
   return { position, target, distance: d, minDistance: 1.5, maxDistance: Math.max(60, d * 3) }
 }
+
+/**
+ * Jeton de recadrage de la caméra. La caméra ne se recadre que si ce jeton change :
+ * « Recentrer » (nonce), autre jardin, autre mode de vue. L'emprise (`frame.key`) n'en fait PAS partie :
+ * sans parcelle elle bouge quand une plante sort des bornes, et cela ne doit ni téléporter le promeneur
+ * ni faire perdre son zoom à l'utilisateur.
+ */
+export function viewResetToken(args: { mode: ViewMode; gardenId: string; nonce: number }): string {
+  return `${args.mode}|${args.gardenId}|${args.nonce}`
+}
+
+/** Jeton de retour à l'entrée en Promenade : « Recentrer » ou autre jardin (jamais l'emprise). */
+export function walkResetToken(args: { gardenId: string; nonce: number }): string {
+  return `${args.gardenId}|${args.nonce}`
+}

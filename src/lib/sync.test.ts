@@ -355,7 +355,7 @@ describe('pushSnapshot', () => {
   it('refuse d’envoyer un état que le stockage local n’a pas pu lire (évite d’écraser le distant par du vide)', async () => {
     const s = await load()
     store.readFailed = true
-    await expect(s.pushSnapshot()).rejects.toThrow(/lecture|lire/i)
+    await expect(s.pushSnapshot()).rejects.toThrow(/pas pu être lues/)
     expect(fake.rows.size).toBe(0)
   })
 })

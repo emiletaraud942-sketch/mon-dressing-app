@@ -97,6 +97,12 @@ export function grassDetailTexture(): THREE.CanvasTexture {
   return t
 }
 
+/** Libère la texture d'herbe (au démontage de la vue 3D) ; elle est régénérée au prochain besoin. */
+export function disposeGrassDetailTexture(): void {
+  texture?.dispose()
+  texture = null
+}
+
 export interface GroundDetail {
   uniforms: { uDetail: { value: THREE.Texture }; uWalk: { value: number } }
   onBeforeCompile: (shader: { uniforms: Record<string, { value: unknown }>; vertexShader: string; fragmentShader: string }) => void

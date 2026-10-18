@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, afterEach, describe, expect, it, vi } from 'vitest'
 import type { DailyWeather, Garden, Plant, Species, TaskDone, WeatherBundle } from '../types'
+import { SPECIES_BY_ID } from '../data/species'
 import { generateTasks, harvestMinAgeYears, pluralFr, purgeTasksDone, waterBalance, weekKey, yearPlan, type TaskContext } from './tasks'
 
 const garden: Garden = { id: 'g1', name: 'Test', address: '', center: { lat: 48.85, lon: 2.35 }, createdAt: '2026-01-01' }
@@ -186,7 +187,7 @@ const run = (extra: Partial<TaskContext>) =>
 
 const done = (taskKey: string, doneAt: string): TaskDone => ({ id: taskKey, gardenId: 'g1', taskKey, doneAt })
 const tailleHiver = (t: { speciesId?: string; type: string; key: string }) =>
-  t.speciesId === 'pommier' && t.type === 'taille' && t.key.includes(':m12.1.2.3+hors-gel:')
+  t.speciesId === 'pommier' && t.type === 'taille' && t.key.includes(':m1.2.3.12+hors-gel:')
 
 describe('weekKey', () => {
   it('semaine ISO', () => {
@@ -217,7 +218,7 @@ describe('generateTasks : regroupement et clés', () => {
     expect(taille[0].plantIds).toEqual(pommiers.map((p) => p.id))
     expect(taille[0].tool).toBe('sécateur')
     // Fenêtre décembre → mars commencée en 2025.
-    expect(taille[0].key).toMatch(/^2025:pommier:taille:m12\.1\.2\.3\+hors-gel:[0-9a-z]{4}(\.[0-9a-z]{4})*$/)
+    expect(taille[0].key).toMatch(/^2025:pommier:taille:m1\.2\.3\.12\+hors-gel:[0-9a-z]{4}(\.[0-9a-z]{4})*$/)
     expect(taille[0].reason).toBe('Fenêtre de taille : décembre à mars, hors gel.')
   })
 
@@ -374,7 +375,7 @@ describe('yearPlan', () => {
 // ---------- Récolte : âge minimal (L1) et règles implicites (L3) ----------
 
 describe('récolte : âge minimal des vivaces (L1)', () => {
-  const oct = new Date(2026, 9, 18, 9)
+  const oct = new Date(2026, 8, 18, 9) // 18 septembre
   const recoltes = (plants: Plant[], speciesId?: string) =>
     run({ plants, today: oct }).filter((t) => t.type === 'recolte' && (!speciesId || t.speciesId === speciesId))
 
@@ -391,7 +392,7 @@ describe('récolte : âge minimal des vivaces (L1)', () => {
   })
 
   it('noyer planté il y a un mois : aucune récolte', () => {
-    expect(recoltes([plant('noyer', { plantedAt: '2026-09-18' })])).toEqual([])
+    expect(recoltes([plant('noyer', { plantedAt: '2026-08-18' })])).toEqual([])
   })
 
   it('noyer adulte (9 ans > seuil de 8) : récolte', () => {
@@ -421,8 +422,21 @@ describe('récolte : âge minimal des vivaces (L1)', () => {
   })
 
   it('un arbre acheté de 10 ans compte son âge total', () => {
-    expect(recoltes([plant('noyer', { plantedAt: '2026-10-17', ageAtPlanting: 10 })])).toHaveLength(1)
-    expect(recoltes([plant('noyer', { plantedAt: '2026-10-17', ageAtPlanting: 2 })])).toEqual([])
+    expect(recoltes([plant('noyer', { plantedAt: '2026-09-17', ageAtPlanting: 10 })])).toHaveLength(1)
+    expect(recoltes([plant('noyer', { plantedAt: '2026-09-17', ageAtPlanting: 2 })])).toEqual([])
+  })
+})
+
+describe('récolte : données réelles (pas de règle implicite en doublon)', () => {
+  it('tomate et pommier ont des règles explicites : une seule tâche de récolte chacun', () => {
+    const real = SPECIES_BY_ID
+    for (const [id, today] of [['tomate', new Date(2026, 7, 10, 9)], ['pommier', new Date(2026, 8, 10, 9)]] as const) {
+      const tasks = generateTasks({
+        garden, speciesById: real, today, tasksDone: [], plants: [plant(id, { plantedAt: '2015-03-01' })],
+      }).filter((t) => t.type === 'recolte')
+      expect(tasks).toHaveLength(1)
+      expect(tasks[0].key).not.toContain('cal-recolte')
+    }
   })
 })
 
@@ -615,8 +629,8 @@ describe('alerte gel : clé par nuit de gel', () => {
     run({ plants: [plant('citronnier')], today, weather: w, tasksDone }).find((t) => t.type === 'protection')
 
   it('la clé est la date de la première nuit de gel, pas du jour le plus froid', () => {
-    const w1 = weather(today, [], [{}, { tMin: -1 }])
-    const w2 = weather(today, [], [{}, { tMin: -1 }, {}, { tMin: -6 }]) // prévision qui se refroidit
+    const w1 = weather(today, [], [{}, { tMin: -2 }])
+    const w2 = weather(today, [], [{}, { tMin: -2 }, {}, { tMin: -6 }]) // prévision qui se refroidit
     const w3 = weather(today, [], [{}, { tMin: -2 }, { tMin: -3 }])
     expect(prot(w1)!.key).toBe('2026-01-14:jardin:protection:gel')
     expect(prot(w2)!.key).toBe('2026-01-14:jardin:protection:gel')
@@ -624,14 +638,14 @@ describe('alerte gel : clé par nuit de gel', () => {
   })
 
   it('cochée, l’alerte ne revient pas quand la prévision change', () => {
-    const w1 = weather(today, [], [{}, { tMin: -1 }])
-    const w2 = weather(today, [], [{}, { tMin: -1 }, {}, { tMin: -6 }])
+    const w1 = weather(today, [], [{}, { tMin: -2 }])
+    const w2 = weather(today, [], [{}, { tMin: -2 }, {}, { tMin: -6 }])
     const tasksDone = [done(prot(w1)!.key, '2026-01-13T08:00:00Z')]
     expect(prot(w2, tasksDone)).toBeUndefined()
   })
 
   it('une nuit de gel suivante donne une nouvelle alerte', () => {
-    const w = weather(today, [], [{}, { tMin: -1 }])
+    const w = weather(today, [], [{}, { tMin: -2 }])
     const tasksDone = [done(prot(w)!.key, '2026-01-13T08:00:00Z')]
     const demain = new Date(2026, 0, 15, 9)
     const w2 = weather(demain, [], [{}, {}, { tMin: -2 }])
@@ -640,7 +654,7 @@ describe('alerte gel : clé par nuit de gel', () => {
   })
 
   it('la raison signale le gel le plus fort s’il est plus tard', () => {
-    const w = weather(today, [], [{}, { tMin: -1 }, {}, { tMin: -6 }])
+    const w = weather(today, [], [{}, { tMin: -2 }, {}, { tMin: -6 }])
     const t = prot(w)!
     expect(t.reason).toContain('demain')
     expect(t.reason).toContain('-6 °C')
@@ -662,8 +676,10 @@ describe('condition « après la récolte »', () => {
     expect(taille('framboisier', new Date(2026, 8, 5, 9)).blockedBy).toBeUndefined()
   })
 
-  it('bloquée avant la récolte quand la fenêtre de la règle la précède', () => {
-    expect(taille('cassissier', new Date(2026, 5, 10, 9)).blockedBy).toMatch(/pas encore terminée|pas encore faite/)
+  it('règle : faisable si le mois est dans `months` et hors des mois de récolte', () => {
+    // Cassissier : fenêtre juin-septembre, récolte juillet-août.
+    expect(taille('cassissier', new Date(2026, 5, 10, 9)).blockedBy).toBeUndefined()
+    expect(taille('cassissier', new Date(2026, 6, 10, 9)).blockedBy).toMatch(/Récolte en cours/)
     expect(taille('cassissier', new Date(2026, 8, 10, 9)).blockedBy).toBeUndefined()
   })
 

@@ -421,3 +421,10 @@ export function partGeometries(): Record<PartKind, THREE.BufferGeometry> {
   }
   return shared
 }
+
+/** Libère les géométries partagées (au démontage de la vue 3D) ; elles sont recréées au prochain besoin. */
+export function disposePartGeometries(): void {
+  if (!shared) return
+  for (const k of PART_KINDS) shared[k].dispose()
+  shared = null
+}

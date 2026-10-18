@@ -13,8 +13,9 @@ import type {
   TaskType,
   WeatherBundle,
 } from '../types'
+import { isoDate } from '../lib/dates'
 import { plantAgeYears } from './growth'
-import { MONTH_NAMES, plantingCalendar } from './calendar'
+import { MONTH_NAMES, formatDoy, frostGate, plantingCalendar } from './calendar'
 
 export interface TaskContext {
   garden: Garden
@@ -59,11 +60,6 @@ const WEEKDAYS = ['dimanche', 'lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi',
 // ---------- Dates ----------
 
 const pad = (n: number) => String(n).padStart(2, '0')
-
-/** Date locale au format YYYY-MM-DD. */
-function isoDate(d: Date): string {
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
-}
 
 /** Semaine ISO 8601, ex. "2026-W42". */
 export function weekKey(d: Date): string {
@@ -124,8 +120,100 @@ function seasonKey(months: Month[], today: Date): string {
   return ws.length > 1 ? `${startYear}-${pad(w.start)}` : String(startYear)
 }
 
-/** Clé sans le préfixe de période. */
-const baseOf = (key: string) => key.slice(key.indexOf(':') + 1)
+// ---------- Clés de tâches ----------
+//
+// Format : `période:espèce:type:règle[:plantes]`
+//  - période : jour (fréquence < 7 j), semaine ISO (≥ 7 j) ou saison (tâche saisonnière) ;
+//  - règle : identifiant dérivé du contenu (mois + condition), indépendant de l'ordre dans `sp.taches` ;
+//  - plantes : étiquettes courtes (4 car.) des plantes concernées, triées, séparées par « . ».
+//    Elles disent quelles plantes ont été couvertes : une plante ajoutée plus tard fait réapparaître la tâche.
+// Anciennes clés (règle = index, pas de plantes) : encore reconnues, elles couvrent toutes les plantes.
+// Alerte gel : `date-de-la-première-nuit:jardin:protection:gel`.
+
+interface ParsedKey {
+  prefix: string
+  /** `espèce:type:règle` (ou `jardin:type:nom`). */
+  base: string
+  /** null = toutes les plantes (ancienne clé ou tâche du jardin). */
+  tags: string[] | null
+}
+
+export function parseTaskKey(key: string): ParsedKey {
+  const parts = key.split(':')
+  if (parts.length < 4) return { prefix: parts[0], base: parts.slice(1).join(':'), tags: null }
+  return { prefix: parts[0], base: parts.slice(1, 4).join(':'), tags: parts[4] ? parts[4].split('.') : null }
+}
+
+/** Étiquette courte et stable d'une plante (FNV-1a sur l'id, 4 caractères base 36). */
+function plantTag(id: string): string {
+  let h = 0x811c9dc5
+  for (let i = 0; i < id.length; i++) {
+    h ^= id.charCodeAt(i)
+    h = Math.imul(h, 0x01000193) >>> 0
+  }
+  return (h % 36 ** 4).toString(36).padStart(4, '0')
+}
+
+const tagsOf = (plants: Plant[]) => [...new Set(plants.map((p) => plantTag(p.id)))].sort()
+
+/** Identifiant d'une règle d'après son contenu : `m1.2.3.12+hors-gel`. */
+function ruleContentId(rule: TaskRule): string {
+  const months = [...new Set(rule.months)].sort((a, b) => a - b).join('.')
+  return `m${months}${rule.condition ? `+${rule.condition}` : ''}`
+}
+
+/** Identifiants des règles d'une espèce ; deux règles identiques sont distinguées par un rang (`-2`). */
+function ruleIds(sp: Species): string[] {
+  const seen = new Map<string, number>()
+  return sp.taches.map((rule) => {
+    const id = ruleContentId(rule)
+    const n = (seen.get(id) ?? 0) + 1
+    seen.set(id, n)
+    return n > 1 ? `${id}-${n}` : id
+  })
+}
+
+const FREQUENT_PREFIX = /^(\d{4}-\d{2}-\d{2}|\d{4}-W\d{2})$/
+
+/**
+ * Purge de l'historique des tâches faites (à appeler au chargement) :
+ *  - supprime les entrées de plus de 400 jours ;
+ *  - pour les tâches fréquentes (période = jour ou semaine), ne garde que la dernière entrée
+ *    qui couvre chaque plante (les anciennes ne servent plus à rien) ;
+ *  - garde les tâches saisonnières et les alertes de gel de moins de 400 jours.
+ * Les entrées à date illisible sont conservées. Ne modifie pas l'entrée, garde l'ordre.
+ */
+export function purgeTasksDone(done: TaskDone[], now: Date): TaskDone[] {
+  const limit = now.getTime() - 400 * DAY_MS
+  const timeOf = (t: TaskDone) => {
+    const at = new Date(t.doneAt).getTime()
+    return Number.isFinite(at) ? at : null
+  }
+  const fresh = done.filter((t) => {
+    const at = timeOf(t)
+    return at == null || at >= limit
+  })
+  const state = new Map<string, { all: boolean; tags: Set<string> }>()
+  const drop = new Set<TaskDone>()
+  const newestFirst = [...fresh].sort((a, b) => (timeOf(b) ?? -Infinity) - (timeOf(a) ?? -Infinity))
+  for (const t of newestFirst) {
+    const k = parseTaskKey(t.taskKey)
+    if (!FREQUENT_PREFIX.test(k.prefix) || k.base.startsWith('jardin:protection')) continue
+    const id = `${t.gardenId ?? ''}|${k.base}`
+    const st = state.get(id) ?? { all: false, tags: new Set<string>() }
+    state.set(id, st)
+    if (st.all) {
+      drop.add(t)
+    } else if (!k.tags) {
+      st.all = true
+    } else {
+      const added = k.tags.filter((x) => !st.tags.has(x))
+      if (!added.length) drop.add(t)
+      for (const x of added) st.tags.add(x)
+    }
+  }
+  return fresh.filter((t) => !drop.has(t))
+}
 
 // ---------- Noms ----------
 
@@ -209,10 +297,22 @@ export function waterBalance(
 
 // ---------- Génération ----------
 
+/** Règle applicable à une plante, avec son identifiant stable. */
+interface RuleEntry {
+  /** Identifiant dans la clé : contenu de la règle (explicite) ou `cal-…` (implicite). */
+  id: string
+  /** Ancienne clé (index dans `sp.taches`), pour reconnaître les tâches déjà cochées. */
+  legacyId?: string
+  rule: TaskRule
+  /** Mois effectifs (après décalage par les gelées locales). */
+  months: Month[]
+  /** Mois où l'on est trop tôt par rapport aux dernières gelées (tâche affichée mais bloquée). */
+  frostMonths: Set<Month>
+}
+
 interface Group {
   sp: Species
-  rule: TaskRule
-  idx: string
+  entry: RuleEntry
   plants: Plant[]
 }
 
@@ -221,24 +321,78 @@ const isSowing = (t: TaskType) => t === 'semis' || t === 'plantation'
 
 const HOWTO_SEMIS = 'Semer en place dans un sol ameubli et désherbé, recouvrir de terre fine puis arroser en pluie fine.'
 const HOWTO_PLANTATION = 'Creuser un trou deux fois plus large que la motte, planter sans enterrer le collet, arroser copieusement puis pailler.'
+const HOWTO_RECOLTE = 'Cueillez à maturité, de préférence le matin ; ne laissez pas les fruits mûrs sur la plante.'
 const HOWTO_ARROSAGE =
   "Arroser au pied, le matin ou le soir : 10 à 15 L par m² ou par jeune arbre, en une fois plutôt qu'un peu chaque jour. Pailler pour garder l'humidité."
 const HOWTO_GEL =
   "Poser un voile d'hivernage sur les plantes basses et les jeunes arbres, pailler épais au pied, rentrer les pots à l'abri. Retirer le voile en journée."
 
-/** Règles de semis / plantation implicites tirées du calendrier de l'espèce (si elle n'en a pas). */
-function implicitSowingRules(sp: Species, garden: Garden): { idx: string; rule: TaskRule }[] {
-  if (sp.taches.some((r) => isSowing(r.type))) return []
-  const cal = plantingCalendar(sp, garden)
-  const condition: TaskCondition | undefined = sp.rusticiteC > -2 ? 'hors-gel' : undefined
-  const out: { idx: string; rule: TaskRule }[] = []
-  if (cal.semisPleineTerre.length) {
-    out.push({ idx: 'cal-semis', rule: { type: 'semis', months: cal.semisPleineTerre, condition, howTo: HOWTO_SEMIS } })
-  }
-  if (cal.plantation.length) {
-    out.push({ idx: 'cal-plantation', rule: { type: 'plantation', months: cal.plantation, condition, howTo: HOWTO_PLANTATION } })
+/** Au-delà de cet âge (ans), une vivace est établie : plus d'arrosage météo (sauf espèces gourmandes en eau). */
+const ESTABLISHED_YEARS = 3
+
+/**
+ * Âge minimal (ans) pour qu'une règle s'applique. `minAgeYears` explicite l'emporte.
+ * Récolte d'une vivace à maturité lente (≥ 3 ans) : 60 % de la maturité, borné entre 2 et 8 ans.
+ * Annuelles et vivaces à maturité rapide (menthe, fraisier…) : aucun seuil.
+ */
+export function harvestMinAgeYears(sp: Species, rule: TaskRule): number {
+  if (rule.minAgeYears != null) return rule.minAgeYears
+  if (rule.type !== 'recolte' || !sp.vivace || !(sp.anneesMaturite >= 3)) return 0
+  return Math.max(2, Math.min(8, Math.round(0.6 * sp.anneesMaturite)))
+}
+
+/** Règles implicites tirées du calendrier de l'espèce : semis/plantation (projet), récolte (plante en place). */
+function implicitRules(sp: Species, garden: Garden, status: Plant['status']): { id: string; rule: TaskRule }[] {
+  const out: { id: string; rule: TaskRule }[] = []
+  if (status === 'projet') {
+    if (sp.taches.some((r) => isSowing(r.type))) return out
+    const cal = plantingCalendar(sp, garden)
+    const condition: TaskCondition | undefined = sp.rusticiteC > -2 ? 'hors-gel' : undefined
+    if (cal.semisPleineTerre.length) {
+      out.push({ id: 'cal-semis', rule: { type: 'semis', months: cal.semisPleineTerre, condition, howTo: HOWTO_SEMIS } })
+    }
+    if (cal.plantation.length) {
+      out.push({ id: 'cal-plantation', rule: { type: 'plantation', months: cal.plantation, condition, howTo: HOWTO_PLANTATION } })
+    }
+  } else if (status === 'en-place' || status === 'malade') {
+    // Seulement si l'espèce n'a aucune règle de récolte explicite (pas de doublon).
+    if (sp.taches.some((r) => r.type === 'recolte')) return out
+    const { recolte } = plantingCalendar(sp, garden)
+    if (recolte.length) {
+      out.push({ id: 'cal-recolte', rule: { type: 'recolte', months: recolte, frequencyDays: 7, howTo: HOWTO_RECOLTE } })
+    }
   }
   return out
+}
+
+/** Le semis de ce mois est-il sous abri (donc non concerné par les gelées) ? */
+const sownUnderCover = (sp: Species, m: Month) => !!sp.semisAbri?.includes(m) && !sp.semisPleineTerre?.includes(m)
+
+/** Règles explicites d'une espèce : identifiants stables, mois décalés par les gelées locales. */
+function explicitRules(sp: Species, garden: Garden): RuleEntry[] {
+  const ids = ruleIds(sp)
+  const gate = frostGate(sp, garden)
+  return sp.taches.map((rule, i) => {
+    let months = [...rule.months]
+    const frostMonths = new Set<Month>()
+    if (gate && isSowing(rule.type)) {
+      for (const m of rule.months) {
+        if (!gate.tooEarly(m) || (rule.type === 'semis' && sownUnderCover(sp, m))) continue
+        frostMonths.add(m)
+        months.push(gate.firstOk)
+      }
+      months = [...new Set(months)]
+    }
+    return { id: ids[i], legacyId: String(i), rule, months, frostMonths }
+  })
+}
+
+/** Récolte en cours (ou à venir dans la fenêtre) : message de blocage pour `apres-recolte`. */
+function harvestBlock(recolte: Month[], month: Month): string | undefined {
+  if (!recolte.includes(month)) return undefined
+  const w = monthWindows(recolte).find((w) => (w.start <= w.end ? month >= w.start && month <= w.end : month >= w.start || month <= w.end))
+  const end = w ? w.end : month
+  return `Récolte en cours (jusqu'en ${MONTH_NAMES[end - 1]}) : attendre la fin`
 }
 
 export function generateTasks(ctx: TaskContext): GeneratedTask[] {
@@ -247,18 +401,27 @@ export function generateTasks(ctx: TaskContext): GeneratedTask[] {
   const todayIso = isoDate(today)
   const week = weekKey(today)
 
+  // Historique des tâches faites, indexé par clé de base (sans période ni plantes).
   const done = ctx.tasksDone.filter((t) => !t.gardenId || t.gardenId === garden.id)
   const doneKeys = new Set(done.map((t) => t.taskKey))
-  const lastDone = new Map<string, number>()
+  interface DoneEntry { prefix: string; at: number; tags: Set<string> | null }
+  const doneByBase = new Map<string, DoneEntry[]>()
   for (const t of done) {
-    const b = baseOf(t.taskKey)
-    const at = new Date(t.doneAt).getTime()
-    if (!(at <= (lastDone.get(b) ?? -Infinity))) lastDone.set(b, at)
+    const k = parseTaskKey(t.taskKey)
+    const list = doneByBase.get(k.base) ?? []
+    list.push({ prefix: k.prefix, at: new Date(t.doneAt).getTime(), tags: k.tags ? new Set(k.tags) : null })
+    doneByBase.set(k.base, list)
   }
-  const recentlyDone = (base: string, days: number) => {
-    const at = lastDone.get(base)
-    return at != null && today.getTime() - at < days * DAY_MS
-  }
+  /** Tâche de jardin (sans plantes) faite il y a moins de `days` jours ? */
+  const recentlyDone = (base: string, days: number) =>
+    (doneByBase.get(base) ?? []).some((e) => today.getTime() - e.at < days * DAY_MS)
+  /** Cette plante est-elle déjà couverte par une tâche faite (période identique, ou récente si fréquente) ? */
+  const covered = (bases: string[], prefix: string, freq: number | undefined, tag: string) =>
+    bases.some((b) =>
+      (doneByBase.get(b) ?? []).some(
+        (e) => (!e.tags || e.tags.has(tag)) && (freq ? today.getTime() - e.at < freq * DAY_MS : e.prefix === prefix),
+      ),
+    )
 
   const wx = weather ? viewOf(weather, today) : undefined
   const balance = weather ? waterBalance(weather, today) : undefined
@@ -269,6 +432,26 @@ export function generateTasks(ctx: TaskContext): GeneratedTask[] {
   const heavyRain = balance != null && balance.forecastRain3 > 5
   const deficitHigh = balance != null && balance.deficitMm > 10
 
+  // Une vivace de plus de 3 ans (hors arrivée récente) est établie : elle ne compte plus dans l'arrosage météo.
+  const established = (p: Plant, sp: Species) => {
+    const planted = new Date(p.plantedAt).getTime()
+    const inGround = Number.isFinite(planted) ? (today.getTime() - planted) / (365.25 * DAY_MS) : 0
+    return sp.vivace && inGround >= 1 && plantAgeYears(p, today) > ESTABLISHED_YEARS
+  }
+  const meteoEligible = (p: Plant) => {
+    const sp = speciesById[p.speciesId]
+    return !!sp && (sp.eau === 'eleve' || !established(p, sp))
+  }
+  const plantById = new Map(plants.map((p) => [p.id, p]))
+  const wateringPriority = (ids: string[]): GeneratedTask['priority'] =>
+    ids.some((id) => {
+      const p = plantById.get(id)
+      const sp = p && speciesById[p.speciesId]
+      return !p || !sp || !established(p, sp)
+    })
+      ? 'haute'
+      : 'normale'
+
   const tasks: GeneratedTask[] = []
 
   // 1. Arrosage déclenché par le bilan hydrique
@@ -278,20 +461,22 @@ export function generateTasks(ctx: TaskContext): GeneratedTask[] {
     const base = 'jardin:arrosage:meteo'
     const thirsty = plants.filter((p) => {
       const sp = speciesById[p.speciesId]
-      if (!sp || !isActive(p)) return false
-      const young = today.getTime() - new Date(p.plantedAt).getTime() < 365.25 * DAY_MS
+      if (!sp || !isActive(p) || !meteoEligible(p)) return false
+      const planted = new Date(p.plantedAt).getTime()
+      const young = Number.isFinite(planted) && today.getTime() - planted < 365.25 * DAY_MS
       return sp.eau === 'moyen' || sp.eau === 'eleve' || young
     })
     meteoWateringHidden = recentlyDone(base, 3)
     if (thirsty.length && !meteoWateringHidden) {
       const deficit = `Déficit de ${fmt(balance.deficitMm)} mm sur 7 jours (pluie ${fmt(balance.rain7)} mm, évaporation ${fmt(balance.et07)} mm)`
+      const plantIds = thirsty.map((p) => p.id)
       meteoWatering = {
         key: `${todayIso}:${base}`,
         type: 'arrosage',
         title: `Arroser les plantes sensibles au sec (${thirsty.length})`,
         howTo: HOWTO_ARROSAGE,
-        plantIds: thirsty.map((p) => p.id),
-        priority: 'haute',
+        plantIds,
+        priority: wateringPriority(plantIds),
         reason: heavyRain
           ? `${deficit}, mais la pluie annoncée devrait suffire.`
           : `${deficit} ; seulement ${fmt(balance.forecastRain3)} mm de pluie prévus sous 3 jours. Jeunes plantations et plantes gourmandes en eau d'abord.`,
@@ -302,15 +487,21 @@ export function generateTasks(ctx: TaskContext): GeneratedTask[] {
   }
   const meteoWateringActive = deficitHigh && !heavyRain
 
-  // 2. Alerte gel : plantes en place moins rustiques que la température prévue
+  // 2. Alerte gel : plantes en place moins rustiques que la température prévue.
+  // La clé est la date de la première nuit de gel (stable quand la prévision se précise).
   if (wx) {
-    const coldest = wx.upcoming.reduce<DailyWeather | undefined>((c, d) => (!c || d.tMin < c.tMin ? d : c), undefined)
-    if (coldest && coldest.tMin <= 0) {
+    const frostDays = wx.upcoming.filter((d) => d.tMin <= 0)
+    if (frostDays.length) {
+      const first = frostDays[0]
+      const coldest = frostDays.reduce((c, d) => (d.tMin < c.tMin ? d : c), first)
       const atRisk = plants.filter((p) => isActive(p) && speciesById[p.speciesId] && speciesById[p.speciesId].rusticiteC > coldest.tMin)
-      const key = `${coldest.date}:jardin:protection:gel`
+      const key = `${first.date}:jardin:protection:gel`
       if (atRisk.length && !doneKeys.has(key)) {
         const spNames = [...new Set(atRisk.map((p) => lowerFirst(speciesById[p.speciesId].nomCommun)))]
         const list = spNames.slice(0, 4).join(', ') + (spNames.length > 4 ? '…' : '')
+        const verb = atRisk.length > 1 ? 'risquent' : 'risque'
+        const stronger =
+          coldest.date !== first.date ? `, jusqu'à ${fmtT(coldest.tMin)} °C ${dayLabel(coldest.date, todayIso)}` : ''
         tasks.push({
           key,
           type: 'protection',
@@ -318,7 +509,7 @@ export function generateTasks(ctx: TaskContext): GeneratedTask[] {
           howTo: HOWTO_GEL,
           plantIds: atRisk.map((p) => p.id),
           priority: 'haute',
-          reason: `Gel prévu ${dayLabel(coldest.date, todayIso)} (${fmtT(coldest.tMin)} °C) : ${list} ${atRisk.length > 1 ? 'risquent' : 'risque'} de geler.`,
+          reason: `Gel prévu ${dayLabel(first.date, todayIso)} (${fmtT(first.tMin)} °C${stronger}) : ${list} ${verb} de geler.`,
         })
       }
     }
@@ -326,49 +517,62 @@ export function generateTasks(ctx: TaskContext): GeneratedTask[] {
 
   // 3. Règles des espèces, regroupées par (espèce, règle)
   const groups = new Map<string, Group>()
+  const explicitCache = new Map<string, RuleEntry[]>()
   for (const p of plants) {
     const sp = speciesById[p.speciesId]
     if (!sp || p.status === 'mort') continue
-    const rules = [
-      ...sp.taches.map((rule, i) => ({ idx: String(i), rule })),
-      ...(p.status === 'projet' ? implicitSowingRules(sp, garden) : []),
+    let explicit = explicitCache.get(sp.id)
+    if (!explicit) explicitCache.set(sp.id, (explicit = explicitRules(sp, garden)))
+    const rules: RuleEntry[] = [
+      ...explicit,
+      ...implicitRules(sp, garden, p.status).map(({ id, rule }) => ({ id, rule, months: rule.months, frostMonths: new Set<Month>() })),
     ]
-    for (const { idx, rule } of rules) {
-      if (!rule.months.includes(month)) continue
+    const age = plantAgeYears(p, today)
+    for (const entry of rules) {
+      const { rule } = entry
+      if (!entry.months.includes(month)) continue
       if (isSowing(rule.type) ? p.status !== 'projet' : !isActive(p)) continue
-      if (rule.minAgeYears != null && plantAgeYears(p, today) < rule.minAgeYears) continue
-      const id = `${sp.id}:${idx}`
-      const g = groups.get(id) ?? { sp, rule, idx, plants: [] }
+      if (age < harvestMinAgeYears(sp, rule)) continue
+      if (rule.maxAgeYears != null && age > rule.maxAgeYears) continue
+      const id = `${sp.id}:${entry.id}`
+      const g = groups.get(id) ?? { sp, entry, plants: [] }
       g.plants.push(p)
       groups.set(id, g)
     }
   }
 
-  for (const { sp, rule, idx, plants: gp } of groups.values()) {
-    const base = `${sp.id}:${rule.type}:${idx}`
+  for (const { sp, entry, plants: gp } of groups.values()) {
+    const { rule } = entry
+    const base = `${sp.id}:${rule.type}:${entry.id}`
+    const bases = entry.legacyId ? [base, `${sp.id}:${rule.type}:${entry.legacyId}`] : [base]
     const freq = rule.frequencyDays
     const prefix = freq ? (freq < 7 ? todayIso : week) : seasonKey(rule.months, today)
-    const key = `${prefix}:${base}`
-    if (freq ? recentlyDone(base, freq) : doneKeys.has(key)) continue
+    // Plantes pas encore couvertes par une tâche faite.
+    let todo = gp.filter((p) => !covered(bases, prefix, freq, plantTag(p.id)))
+    if (!todo.length) continue
 
-    // L'arrosage météo couvre déjà ces plantes : on les y rattache.
-    if (rule.type === 'arrosage' && meteoWateringActive) {
+    // L'arrosage météo couvre déjà les plantes concernées : on les y rattache.
+    if (rule.type === 'arrosage' && meteoWateringActive && (meteoWatering || meteoWateringHidden)) {
+      const mergeable = todo.filter(meteoEligible)
       if (meteoWatering) {
-        for (const p of gp) if (!meteoWatering.plantIds.includes(p.id)) meteoWatering.plantIds.push(p.id)
+        for (const p of mergeable) if (!meteoWatering.plantIds.includes(p.id)) meteoWatering.plantIds.push(p.id)
         meteoWatering.title = `Arroser les plantes sensibles au sec (${meteoWatering.plantIds.length})`
-        continue
+        meteoWatering.priority = wateringPriority(meteoWatering.plantIds)
       }
-      if (meteoWateringHidden) continue
+      todo = todo.filter((p) => !meteoEligible(p))
+      if (!todo.length) continue
     }
 
-    const parts = [`Fenêtre de ${TYPE_NOUN[rule.type]} : ${monthsLabel(rule.months)}`]
+    const key = `${prefix}:${base}:${tagsOf(todo).join('.')}`
+    const monthsShown = entry.months
+    const parts = [`Fenêtre de ${TYPE_NOUN[rule.type]} : ${monthsLabel(monthsShown)}`]
     if (rule.condition) parts.push(CONDITION_LABEL[rule.condition])
     if (freq) parts.push(`tous les ${freq} jours`)
     let reason = parts.join(', ') + '.'
     let priority: GeneratedTask['priority'] = 'normale'
     let blockedBy: string | undefined
 
-    if (rule.type === 'traitement' && gp.some((p) => p.status === 'malade')) {
+    if (rule.type === 'traitement' && todo.some((p) => p.status === 'malade')) {
       priority = 'haute'
       reason += ' Une plante est signalée malade.'
     }
@@ -401,8 +605,18 @@ export function generateTasks(ctx: TaskContext): GeneratedTask[] {
         }
         break
       }
+      case 'apres-recolte':
+        // Faisable dans la fenêtre de la règle, hors des mois de récolte (sans mois de récolte : jamais bloquée).
+        blockedBy = harvestBlock(plantingCalendar(sp, garden).recolte, month)
+        break
       default:
         break
+    }
+
+    // Semis / plantation trop tôt pour les gelées locales.
+    if (!blockedBy && entry.frostMonths.has(month)) {
+      const gate = frostGate(sp, garden)
+      if (gate) blockedBy = `Dernières gelées vers le ${formatDoy(gate.lastFrostDoy)} : attendre ${MONTH_NAMES[gate.firstOk - 1]}`
     }
 
     if (rule.type === 'arrosage' && balance && !blockedBy) {
@@ -412,14 +626,16 @@ export function generateTasks(ctx: TaskContext): GeneratedTask[] {
         reason += ` Pluie récente suffisante (${fmt(balance.rain7)} mm sur 7 jours).`
       }
     }
+    // Des arbres établis ne déclenchent jamais de priorité haute pour l'arrosage.
+    if (rule.type === 'arrosage' && priority === 'haute' && todo.every((p) => !meteoEligible(p))) priority = 'normale'
 
     tasks.push({
       key,
       type: rule.type,
-      title: taskTitle(rule.type, sp, gp.length),
+      title: taskTitle(rule.type, sp, todo.length),
       howTo: rule.howTo,
       ...(rule.tool ? { tool: rule.tool } : {}),
-      plantIds: gp.map((p) => p.id),
+      plantIds: todo.map((p) => p.id),
       speciesId: sp.id,
       priority,
       reason,

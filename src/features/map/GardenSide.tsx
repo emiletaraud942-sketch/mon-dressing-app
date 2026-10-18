@@ -1,11 +1,14 @@
 import { useState } from 'react'
 import { SPECIES_BY_ID } from '../../data/species'
+import { STATUS_LABEL } from '../../data/labels'
 import { Icon } from '../../components/Icon'
 import { SpeciesPicker } from '../../components/SpeciesPicker'
 import { useGardenPlants } from '../../lib/store'
-import { setUi, startPlacing, useUi } from '../../lib/ui'
+import { closePlantSheet, setUi, startPlacing, stopPlacing, useUi } from '../../lib/ui'
 import type { Garden } from '../../types'
 import { PlantPanel, plantName } from '../plants/PlantPanel'
+
+const MAX_LISTED = 60
 
 /** Panneau latéral partagé par la carte et la 3D. */
 export function GardenSide({ garden, hint }: { garden: Garden; hint: string }) {
@@ -14,7 +17,7 @@ export function GardenSide({ garden, hint }: { garden: Garden; hint: string }) {
   const [picking, setPicking] = useState(false)
   const selected = plants.find((p) => p.id === selectedPlantId)
 
-  if (selected) return <PlantPanel garden={garden} plant={selected} onClose={() => setUi({ selectedPlantId: undefined })} />
+  if (selected) return <PlantPanel garden={garden} plant={selected} onClose={closePlantSheet} />
 
   return (
     <div className="stack" style={{ gap: 12 }}>
@@ -31,17 +34,22 @@ export function GardenSide({ garden, hint }: { garden: Garden; hint: string }) {
       <p className="muted small">{hint}</p>
       {plants.length > 0 && (
         <ul className="list small">
-          {plants.slice(0, 60).map((p) => {
+          {plants.slice(0, MAX_LISTED).map((p) => {
             const s = SPECIES_BY_ID[p.speciesId]
             return (
               <li key={p.id}>
-                <button className="btn ghost small" style={{ width: '100%', justifyContent: 'flex-start' }} onClick={() => setUi({ selectedPlantId: p.id })}>
-                  <span className="dot" style={{ background: s?.couleurAccent ?? s?.couleur ?? '#6a9a5a' }} /> {plantName(p)}
-                  {p.status !== 'en-place' && <span className="badge">{p.status}</span>}
+                <button className="btn ghost small tall" style={{ width: '100%', justifyContent: 'flex-start' }} onClick={() => setUi({ selectedPlantId: p.id })}>
+                  <span className="dot" style={{ background: s?.couleurAccent ?? s?.couleur ?? 'var(--accent-2)' }} /> {plantName(p)}
+                  {p.status !== 'en-place' && <span className="badge">{STATUS_LABEL[p.status]}</span>}
                 </button>
               </li>
             )
           })}
+          {plants.length > MAX_LISTED && (
+            <li className="muted">
+              + {plants.length - MAX_LISTED} autres : voir l'onglet « Plantes ».
+            </li>
+          )}
         </ul>
       )}
       {picking && (
@@ -59,16 +67,21 @@ export function GardenSide({ garden, hint }: { garden: Garden; hint: string }) {
 }
 
 export function PlacingBanner() {
-  const { placingSpeciesId, placingCustomName } = useUi()
+  const { placingSpeciesId, placingCustomName, placingSeries } = useUi()
   if (!placingSpeciesId) return null
+  const name = placingCustomName || SPECIES_BY_ID[placingSpeciesId]?.nomCommun
   return (
     <div className="floating placing-banner" role="status">
       <Icon name="pin" />
-      <span>
-        Touchez l'emplacement de : <strong>{placingCustomName || SPECIES_BY_ID[placingSpeciesId]?.nomCommun}</strong>
+      <span className="placing-text">
+        <strong>{name}</strong>
+        {placingSeries && placingSeries.count > 0 ? ` · ${placingSeries.count} placé${placingSeries.count > 1 ? 's' : ''}` : ''}
+        <span className="small muted" style={{ display: 'block' }}>
+          Touchez la carte pour placer — glissez un point pour déplacer
+        </span>
       </span>
-      <button className="btn small" onClick={() => setUi({ placingSpeciesId: undefined, placingCustomName: undefined, pendingPhotos: undefined })}>
-        Annuler
+      <button className={'btn small' + (placingSeries ? ' primary' : '')} onClick={stopPlacing}>
+        {placingSeries ? 'Terminé' : 'Annuler'}
       </button>
     </div>
   )
