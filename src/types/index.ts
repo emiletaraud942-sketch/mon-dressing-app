@@ -59,6 +59,8 @@ export interface TaskRule {
   frequencyDays?: number
   /** Ne concerne que les plantes d'au moins N années (ex. taille de formation). */
   minAgeYears?: number
+  /** Ne concerne plus les plantes de plus de N années (ex. arrosage des jeunes plants : 3). */
+  maxAgeYears?: number
   /** Comment faire : geste, outil, précaution. 1 à 3 phrases. */
   howTo: string
   tool?: string
