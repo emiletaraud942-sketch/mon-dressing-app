@@ -354,6 +354,10 @@ export function Scene(props: SceneProps) {
         return { x: r.left + ((p.x + 1) / 2) * r.width, y: r.top + ((1 - p.y) / 2) * r.height }
       },
       base: (id: string) => visualsRef.current[id]?.base ?? null,
+      camera: () => {
+        const c = get().camera as THREE.OrthographicCamera & THREE.PerspectiveCamera
+        return { position: c.position.toArray(), zoom: c.zoom, ortho: !!c.isOrthographicCamera }
+      },
       stats: () => ({ builds: builds.current, calls: gl.info.render.calls, triangles: gl.info.render.triangles, frames: gl.info.render.frame, geometries: gl.info.memory.geometries, textures: gl.info.memory.textures }),
     }
     return () => {
@@ -429,9 +433,13 @@ export function Scene(props: SceneProps) {
         if (ev.pointerId !== ne.pointerId) return
         cleanup()
         if (commit && moved && last) {
-          cb.current.onMovePlant(id, last)
-          // Une fois la donnée à jour, on reconstruit une fois : cohérence garantie même si l'appelant a refusé le déplacement.
-          window.setTimeout(() => setRebuild((n) => n + 1), 60)
+          const dropped = last
+          cb.current.onMovePlant(id, dropped)
+          // Si la donnée n'a pas suivi (déplacement refusé par l'appelant), on reconstruit pour revenir à la vérité.
+          window.setTimeout(() => {
+            const b = visualsRef.current[id]?.base
+            if (!b || Math.abs(b[0] - dropped.x) > 1e-6 || Math.abs(b[2] + dropped.y) > 1e-6) setRebuild((n) => n + 1)
+          }, 120)
         } else if (moved) {
           place(origin[0], origin[1], origin[2]) // annulé : la plante revient où elle était
         }

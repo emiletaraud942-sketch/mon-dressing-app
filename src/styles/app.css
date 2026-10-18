@@ -251,7 +251,11 @@ label:focus-within:has(> input.sr-only) {
   }
   .navbtn .badge {
     position: absolute;
-    margin: 0 0 0 18px;
+    top: 2px;
+    left: calc(50% + 4px);
+    margin: 0;
+    font-size: 0.7rem;
+    min-width: 18px;
   }
   .navbtn {
     position: relative;
@@ -739,7 +743,7 @@ label.field > span {
     padding-top: 4px;
     box-shadow: 0 -2px 12px rgb(0 0 0 / 12%);
     position: relative;
-    z-index: 4;
+    z-index: 6;
   }
   /* Volet du bas extensible : poignée + 3 hauteurs (38 %, 70 %, 100 %). */
   .sidepanel[data-snap='70'] {
@@ -763,6 +767,8 @@ label.field > span {
     position: sticky;
     top: 0;
     z-index: 1;
+    background: var(--surface);
+    border-radius: 16px 16px 0 0;
   }
   .sheet-handle span {
     width: 44px;
@@ -885,7 +891,9 @@ label.field > span {
 }
 .data-banner.compact {
   margin: 0;
+  padding: 8px 10px;
   font-size: 0.85rem;
+  line-height: 1.3;
 }
 .data-banner .btn {
   flex: none;

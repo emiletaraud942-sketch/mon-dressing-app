@@ -1,10 +1,12 @@
 import { SPECIES_BY_ID } from '../../data/species'
 import { isoDate } from '../../lib/dates'
 import { addPlant, removePlant, updatePlant } from '../../lib/store'
-import { showToast } from '../../lib/toast'
+import { dismissToast, showToast } from '../../lib/toast'
 import { getUi, setUi, type Tab } from '../../lib/ui'
 import { uid } from '../../lib/geo'
 import type { Garden, XY } from '../../types'
+
+let lastSeriesToast: number | undefined
 
 /**
  * Ajoute une plante à la position choisie.
@@ -28,7 +30,9 @@ export function placePlant(garden: Garden, speciesId: string, position: XY, stat
   if (placingSeries) {
     const count = placingSeries.count + 1
     setUi({ placingSeries: { count }, pendingPhotos: undefined, selectedPlantId: undefined })
-    showToast({ message: `${name} placé (${count} dans cette série).`, actionLabel: 'Annuler', onAction: () => removePlant(id) })
+    // Un seul message à la fois pour la série : le précédent est remplacé (sa plante reste placée).
+    if (lastSeriesToast !== undefined) dismissToast(lastSeriesToast)
+    lastSeriesToast = showToast({ message: `${name} placé (${count} dans cette série).`, actionLabel: 'Annuler', onAction: () => removePlant(id), durationMs: 6000 })
     return
   }
   setUi({ placingSpeciesId: undefined, placingCustomName: undefined, pendingPhotos: undefined, selectedPlantId: id, ...(opts.tab ? { tab: opts.tab } : {}) })

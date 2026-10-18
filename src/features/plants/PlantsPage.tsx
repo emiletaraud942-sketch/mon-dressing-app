@@ -92,7 +92,7 @@ export function PlantsPage({ garden }: { garden: Garden }) {
         {selected && (
           <div className="card">
             <PlantPanel garden={garden} plant={selected} onClose={closePlantSheet} />
-            <button className="btn small" style={{ marginTop: 8 }} onClick={() => setUi({ tab: 'carte' })}>
+            <button className="btn small" style={{ marginTop: 8 }} onClick={() => setUi({ tab: 'carte', focusPlantId: selected.id })}>
               <Icon name="map" size={16} /> Voir sur la carte
             </button>
           </div>

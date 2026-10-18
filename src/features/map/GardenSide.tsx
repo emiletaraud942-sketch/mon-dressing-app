@@ -38,7 +38,7 @@ export function GardenSide({ garden, hint }: { garden: Garden; hint: string }) {
             const s = SPECIES_BY_ID[p.speciesId]
             return (
               <li key={p.id}>
-                <button className="btn ghost small tall" style={{ width: '100%', justifyContent: 'flex-start' }} onClick={() => setUi({ selectedPlantId: p.id })}>
+                <button className="btn ghost small tall" style={{ width: '100%', justifyContent: 'flex-start' }} onClick={() => setUi({ selectedPlantId: p.id, focusPlantId: p.id })}>
                   <span className="dot" style={{ background: s?.couleurAccent ?? s?.couleur ?? 'var(--accent-2)' }} /> {plantName(p)}
                   {p.status !== 'en-place' && <span className="badge">{STATUS_LABEL[p.status]}</span>}
                 </button>

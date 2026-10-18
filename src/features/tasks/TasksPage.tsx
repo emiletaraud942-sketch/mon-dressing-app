@@ -84,7 +84,7 @@ function TaskItem({ garden, task, weatherPending }: { garden: Garden; task: Gene
           {task.plantIds.slice(0, 8).map((id) => {
             const p = plants.find((x) => x.id === id)
             return (
-              <button key={id} className="btn small ghost" onClick={() => setUi({ tab: 'carte', selectedPlantId: id })}>
+              <button key={id} className="btn small ghost" onClick={() => setUi({ tab: 'carte', selectedPlantId: id, focusPlantId: id })}>
                 📍 {p?.customName || SPECIES_BY_ID[p?.speciesId ?? '']?.nomCommun || 'plante'}
               </button>
             )

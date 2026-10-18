@@ -27,6 +27,8 @@ interface UiState {
   planting?: PlantingState
   /** Mois choisi dans « Que semer et planter en ». */
   sowMonth?: number
+  /** Plante sur laquelle la carte doit se centrer (« 📍 plante » d'une tâche, « Voir sur la carte »). Effacé une fois fait. */
+  focusPlantId?: string
   /** Demande l'ouverture du formulaire « Nouveau jardin » dans les Réglages. */
   newGarden?: boolean
 }

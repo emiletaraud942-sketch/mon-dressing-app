@@ -78,8 +78,6 @@ export function MapView({ garden }: { garden: Garden }) {
   const [ready, setReady] = useState(false)
   const [tileProblem, setTileProblem] = useState(false)
   const [legendOpen, setLegendOpen] = useState(false)
-  /** La sélection vient d'un appui sur la carte : on ne recentre pas sous le doigt. */
-  const selectedOnMap = useRef(false)
   const gardenRef = useRef(garden)
   gardenRef.current = garden
   const placingRef = useRef(placingSpeciesId)
@@ -217,10 +215,7 @@ export function MapView({ garden }: { garden: Garden }) {
         hit.tabIndex = 0
         hit.setAttribute('role', 'button')
         hit.appendChild(document.createElement('span'))
-        const select = () => {
-          selectedOnMap.current = true
-          setUi({ selectedPlantId: p.id })
-        }
+        const select = () => setUi({ selectedPlantId: p.id })
         hit.addEventListener('click', (ev) => {
           ev.stopPropagation()
           select()
@@ -240,7 +235,6 @@ export function MapView({ garden }: { garden: Garden }) {
           const pos = mk!.getLngLat()
           const g = gardenRef.current
           updatePlant(p.id, { position: toLocal(g.center, { lon: pos.lng, lat: pos.lat }) })
-          selectedOnMap.current = true
           setUi({ selectedPlantId: p.id })
           const before = from
           if (before) {
@@ -269,19 +263,17 @@ export function MapView({ garden }: { garden: Garden }) {
     }
   }, [plants, selectedPlantId, garden.center, ready])
 
-  // Plante choisie depuis une liste ou une tâche : la carte se centre dessus.
+  // « 📍 plante » d'une tâche, « Voir sur la carte » : la carte se centre sur la plante.
+  const { focusPlantId } = useUi()
   useEffect(() => {
     const m = map.current
-    if (!m || !ready || !selectedPlantId) return
-    if (selectedOnMap.current) {
-      selectedOnMap.current = false
-      return
-    }
-    const p = plantsRef.current.find((x) => x.id === selectedPlantId)
+    if (!m || !ready || !focusPlantId) return
+    const p = plantsRef.current.find((x) => x.id === focusPlantId)
+    setUi({ focusPlantId: undefined })
     if (!p) return
     const ll = toLonLat(gardenRef.current.center, p.position)
     m.easeTo({ center: [ll.lon, ll.lat], zoom: Math.max(m.getZoom(), 19), duration: 500 })
-  }, [selectedPlantId, ready])
+  }, [focusPlantId, ready])
 
   useEffect(() => {
     const c = map.current?.getCanvas()
