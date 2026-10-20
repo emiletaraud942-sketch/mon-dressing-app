@@ -3,6 +3,7 @@ import { SPECIES_BY_ID } from '../../data/species'
 import { CATEGORY_LABEL, STATUS_LABEL, formatDate } from '../../data/labels'
 import { Icon } from '../../components/Icon'
 import { SpeciesPicker, normalize } from '../../components/SpeciesPicker'
+import { PlaceAction } from '../../components/PlaceAction'
 import { PhotoThumb } from '../../components/PhotoThumb'
 import { useGardenPlants } from '../../lib/store'
 import { closePlantSheet, setUi, startPlacing, useUi } from '../../lib/ui'
@@ -58,7 +59,18 @@ export function PlantsPage({ garden }: { garden: Garden }) {
         <div className="card">
           {plants.length === 0 && (
             <div className="empty">
-              <p>Aucune plante pour l'instant. Ajoutez-en une depuis le catalogue ou identifiez-la par photo.</p>
+              <p>
+                <strong>Ajoutez vos plantes pour suivre leur croissance et leurs soins.</strong>
+              </p>
+              <p>Placez-les sur la carte, ou identifiez une plante à partir d'une photo.</p>
+              <div className="row empty-actions">
+                <PlaceAction>
+                  <Icon name="plus" /> Placer
+                </PlaceAction>
+                <button className="btn" onClick={() => setIdentifying(true)}>
+                  <Icon name="camera" /> Identifier par photo
+                </button>
+              </div>
             </div>
           )}
           {groups.map(([cat, list]) => (

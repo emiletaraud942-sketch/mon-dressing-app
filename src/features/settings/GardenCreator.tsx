@@ -3,6 +3,7 @@ import { useIsMobile } from '../../components/useMedia'
 import type { GeocodeResult } from '../../lib/ign'
 import { addGarden, addPlant, getState } from '../../lib/store'
 import { uid } from '../../lib/geo'
+import { showFirstSteps } from '../../lib/ui'
 import type { Garden } from '../../types'
 import { AddressSearch } from './AddressSearch'
 import { buildGarden, FAIL_HELP, INITIAL_STEPS, type Step } from './createGarden'
@@ -81,6 +82,8 @@ export function GardenCreator({ onDone, allowDemo }: { onDone?: () => void; allo
     if (!built) return
     addGarden(built.garden)
     if (built.demo) for (const pl of demoPlants(built.garden)) addPlant({ ...pl, id: uid() })
+    // Nouveau jardin : on ouvre « Mon jardin » avec la checklist « Premiers pas » (une fois ; la modélisation reste facultative).
+    showFirstSteps()
     onDone?.()
   }
 

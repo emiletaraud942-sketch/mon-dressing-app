@@ -156,8 +156,9 @@ function initialUi(): UiState {
     extra = { selectedPlantId: stored.selectedPlantId, speciesId: stored.speciesId }
   } else {
     const fromHash = parseHash(location.hash)
-    tab = fromHash ?? 'carte'
     tabImplicit = !fromHash
+    // Relance sans écran désigné : on rouvre le mode où l'on s'était arrêté.
+    tab = fromHash ?? (storedMode ? DEFAULT_TAB[storedMode] : 'carte')
   }
   return { tab, mode: modeForTab(tab, storedMode ?? 'jardin'), guide: readGuide(), ...extra }
 }

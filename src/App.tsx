@@ -2,14 +2,18 @@ import { lazy, Suspense, useEffect, useState } from 'react'
 import { notifyDailyTasks } from './lib/notify'
 import { Icon } from './components/Icon'
 import { ErrorBoundary } from './components/ErrorBoundary'
+import { FirstSteps } from './components/FirstSteps'
+import { HelpSheet } from './components/HelpSheet'
 import { Modal } from './components/Modal'
+import { ModeSwitch } from './components/ModeSwitch'
+import { ProgressCard } from './components/ProgressCard'
 import { StorageBanner } from './components/StorageBanner'
 import { ToastHost } from './components/Toast'
 import { UpdateBanner } from './components/UpdateBanner'
 import { consumeExportReminder } from './lib/backup'
-import { getLoadWarnings, getState, setActiveGarden, useActiveGarden, useStore } from './lib/store'
+import { getLoadWarnings, getState, setActiveGarden, useActiveGarden, useGardenPlants, useStore } from './lib/store'
 import { showToast } from './lib/toast'
-import { setUi, useUi, type Tab } from './lib/ui'
+import { ALWAYS_TABS, MODE_TABS, applyDefaultMode, noteVisit, setUi, useUi, type Mode, type Tab } from './lib/ui'
 import { Onboarding } from './features/settings/Onboarding'
 import { PlantsPage } from './features/plants/PlantsPage'
 import { TasksPage } from './features/tasks/TasksPage'
@@ -27,21 +31,24 @@ const Loading = ({ label }: { label: string }) => (
   </div>
 )
 
-/** `more` : l'entrée n'existe que dans le menu « Plus » sur téléphone (la barre du bas garde 5 entrées + Plus). */
-const NAV: { tab: Tab; label: string; icon: string; more?: boolean }[] = [
-  { tab: 'carte', label: 'Carte', icon: 'map' },
-  { tab: '3d', label: '3D', icon: 'cube' },
-  { tab: 'plantes', label: 'Plantes', icon: 'leaf' },
-  { tab: 'entretien', label: 'Entretien', icon: 'check' },
-  { tab: 'planter', label: 'Planter', icon: 'sprout' },
-  { tab: 'catalogue', label: 'Catalogue', icon: 'book', more: true },
-  { tab: 'reglages', label: 'Réglages', icon: 'settings', more: true },
-]
+const NAV: Record<Tab, { label: string; icon: string }> = {
+  carte: { label: 'Carte', icon: 'map' },
+  '3d': { label: '3D', icon: 'cube' },
+  plantes: { label: 'Plantes', icon: 'leaf' },
+  entretien: { label: 'Entretien', icon: 'check' },
+  planter: { label: 'Planter', icon: 'sprout' },
+  catalogue: { label: 'Catalogue', icon: 'book' },
+  reglages: { label: 'Réglages', icon: 'settings' },
+}
+const MORE_LABEL: Partial<Record<Tab, string>> = { catalogue: 'Catalogue des espèces', reglages: 'Réglages et sauvegarde' }
+
+/** Catalogue et Réglages restent accessibles dans tous les modes : barre du bas si le mode les contient, sinon menu « Plus ». */
+const extraTabs = (mode: Mode) => ALWAYS_TABS.filter((t) => !MODE_TABS[mode].includes(t))
 
 const NEW_GARDEN = '__new'
 
 function MoreSheet({ onClose, onNewGarden }: { onClose: () => void; onNewGarden: () => void }) {
-  const { tab } = useUi()
+  const { tab, mode } = useUi()
   const go = (t: Tab) => {
     onClose()
     setUi({ tab: t })
@@ -49,9 +56,9 @@ function MoreSheet({ onClose, onNewGarden }: { onClose: () => void; onNewGarden:
   return (
     <Modal title="Plus" sheet onClose={onClose}>
       <div className="stack more-list">
-        {NAV.filter((n) => n.more).map((n) => (
-          <button key={n.tab} className="btn more-item" aria-current={tab === n.tab ? 'page' : undefined} onClick={() => go(n.tab)}>
-            <Icon name={n.icon} /> {n.label === 'Catalogue' ? 'Catalogue des espèces' : 'Réglages et sauvegarde'}
+        {extraTabs(mode).map((t) => (
+          <button key={t} className="btn more-item" aria-current={tab === t ? 'page' : undefined} onClick={() => go(t)}>
+            <Icon name={NAV[t].icon} /> {MORE_LABEL[t] ?? NAV[t].label}
           </button>
         ))}
         <button
@@ -72,9 +79,11 @@ export function App() {
   const loaded = useStore((s) => s.loaded)
   const gardens = useStore((s) => s.gardens)
   const garden = useActiveGarden()
-  const { tab } = useUi()
+  const { tab, mode } = useUi()
+  const plantCount = useGardenPlants(garden?.id).length
   const { tasks, weather, weatherLoading } = useTasks(garden)
   const [moreOpen, setMoreOpen] = useState(false)
+  const [helpOpen, setHelpOpen] = useState(false)
   const open = tasks.filter((t) => !t.blockedBy && !t.done).length
   const weatherReady = !weatherLoading && !!weather
   useEffect(() => {
@@ -94,6 +103,17 @@ export function App() {
       })
     }
   }, [loaded])
+
+  // Premier lancement sans mode mémorisé : « Mon jardin » s'il y a peu de plantes, sinon « Entretenir ».
+  const gardenId = garden?.id
+  useEffect(() => {
+    if (loaded && gardenId) applyDefaultMode(plantCount)
+    // Une seule fois par chargement : plantCount ne doit pas relancer le choix.
+  }, [loaded, gardenId]) // eslint-disable-line react-hooks/exhaustive-deps
+  // Mémorise les écrans déjà ouverts (alimente la jauge et le mode conseillé).
+  useEffect(() => {
+    if (loaded && gardenId) noteVisit(tab, gardenId)
+  }, [loaded, gardenId, tab])
 
   const startNewGarden = () => setUi({ tab: 'reglages', newGarden: true })
 
@@ -142,35 +162,48 @@ export function App() {
         <button className="btn small hide-mobile" onClick={startNewGarden}>
           <Icon name="plus" size={16} /> Jardin
         </button>
+        <button className="btn icon-btn help-btn" aria-label="Aide" aria-haspopup="dialog" title="Aide" onClick={() => setHelpOpen(true)}>
+          ?
+        </button>
       </header>
+      <div className="modebar">
+        <ModeSwitch mode={mode} openTasks={open} />
+        {mode === 'jardin' && MODE_TABS.jardin.includes(tab) && (
+          <div className="guide">
+            <ProgressCard garden={garden} />
+            <FirstSteps garden={garden} />
+          </div>
+        )}
+      </div>
       <nav className="sidenav" aria-label="Navigation principale">
-        {NAV.map((n) => (
-          <button
-            key={n.tab}
-            className={'navbtn' + (n.more ? ' hide-mobile' : '')}
-            aria-current={tab === n.tab ? 'page' : undefined}
-            onClick={() => setUi({ tab: n.tab })}
-          >
-            <Icon name={n.icon} />
-            {n.label}
-            {n.tab === 'entretien' && open > 0 && (
+        {MODE_TABS[mode].map((t) => (
+          <button key={t} className="navbtn" aria-current={tab === t ? 'page' : undefined} onClick={() => setUi({ tab: t })}>
+            <Icon name={NAV[t].icon} />
+            {NAV[t].label}
+            {t === 'entretien' && open > 0 && (
               <span className="badge count" aria-label={`${open} tâche${open > 1 ? 's' : ''} à faire`}>
                 {open}
               </span>
             )}
           </button>
         ))}
+        {extraTabs(mode).map((t) => (
+          <button key={t} className="navbtn hide-mobile" aria-current={tab === t ? 'page' : undefined} onClick={() => setUi({ tab: t })}>
+            <Icon name={NAV[t].icon} />
+            {NAV[t].label}
+          </button>
+        ))}
         <button
           className="navbtn show-mobile"
           aria-haspopup="dialog"
-          aria-current={NAV.some((n) => n.more && n.tab === tab) ? 'page' : undefined}
+          aria-current={extraTabs(mode).includes(tab) ? 'page' : undefined}
           onClick={() => setMoreOpen(true)}
         >
           <Icon name="menu" />
           Plus
         </button>
       </nav>
-      <main className={'main' + (full ? ' full' : '')}>
+      <main id="main-panel" className={'main' + (full ? ' full' : '')}>
         <ErrorBoundary inline resetKey={tab}>
           {tab === 'carte' && (
             <Suspense fallback={<Loading label="Chargement de la carte…" />}>
@@ -196,6 +229,7 @@ export function App() {
         <StorageBanner />
       </div>
       <ToastHost />
+      {helpOpen && <HelpSheet tab={tab} onClose={() => setHelpOpen(false)} />}
       {moreOpen && <MoreSheet onClose={() => setMoreOpen(false)} onNewGarden={startNewGarden} />}
     </div>
   )

@@ -1,7 +1,21 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 // Faux navigateur minimal : pile d'historique + événements popstate.
-function installBrowser(initialHash: string) {
+type FakeStorage = { getItem(k: string): string | null; setItem(k: string, v: string): void }
+const memoryStorage = (init: Record<string, string> = {}) => {
+  const data = new Map(Object.entries(init))
+  return { data, getItem: (k: string) => data.get(k) ?? null, setItem: (k: string, v: string) => void data.set(k, v) }
+}
+const brokenStorage: FakeStorage = {
+  getItem() {
+    throw new Error('SecurityError')
+  },
+  setItem() {
+    throw new Error('QuotaExceededError')
+  },
+}
+
+function installBrowser(initialHash: string, storage?: FakeStorage) {
   const entries: { state: unknown; hash: string }[] = [{ state: null, hash: initialHash }]
   let index = 0
   const listeners: Record<string, ((e: unknown) => void)[]> = {}
@@ -31,15 +45,16 @@ function installBrowser(initialHash: string) {
   }
   vi.stubGlobal('location', location)
   vi.stubGlobal('history', history)
+  if (storage) vi.stubGlobal('localStorage', storage)
   vi.stubGlobal('window', {
     addEventListener: (type: string, l: (e: unknown) => void) => (listeners[type] ??= []).push(l),
   })
   return { entries, back: () => history.back(), length: () => entries.length, current: () => entries[index] }
 }
 
-async function load(hash = '') {
+async function load(hash = '', storage?: FakeStorage) {
   vi.resetModules()
-  const b = installBrowser(hash)
+  const b = installBrowser(hash, storage)
   const ui = await import('./ui')
   return { b, ui }
 }
@@ -141,5 +156,179 @@ describe('historique', () => {
     ui.stopPlacing()
     expect(ui.getUi().placingSeries).toBeUndefined()
     expect(ui.getUi().placingSpeciesId).toBeUndefined()
+  })
+})
+
+describe('modes', () => {
+  it('associe chaque mode à ses onglets, Catalogue et Réglages restant accessibles partout', async () => {
+    const { ui } = await load()
+    expect(ui.MODE_TABS.jardin).toEqual(['carte', '3d', 'plantes'])
+    expect(ui.MODE_TABS.entretenir).toEqual(['entretien', 'plantes'])
+    expect(ui.MODE_TABS.planifier).toEqual(['planter', 'catalogue', '3d'])
+    for (const m of ui.MODES) {
+      expect(ui.tabInMode(m, 'reglages')).toBe(true)
+      expect(ui.tabInMode(m, 'catalogue')).toBe(true)
+      expect(ui.MODE_TABS[m].length).toBeLessThanOrEqual(5)
+    }
+    expect(ui.tabInMode('entretenir', 'carte')).toBe(false)
+  })
+
+  it('mode par défaut : jardin sous 3 plantes, sinon entretenir', async () => {
+    const { ui } = await load()
+    expect(ui.defaultMode(0)).toBe('jardin')
+    expect(ui.defaultMode(2)).toBe('jardin')
+    expect(ui.defaultMode(3)).toBe('entretenir')
+  })
+
+  it('ouvre sur « jardin » sans mémoire, même si localStorage est indisponible', async () => {
+    const { ui } = await load('', brokenStorage)
+    expect(ui.getUi().mode).toBe('jardin')
+    ui.setMode('entretenir') // ne doit pas lever
+    expect(ui.getUi().mode).toBe('entretenir')
+    ui.setGuide({ stepsHidden: false })
+    expect(ui.getUi().guide.stepsHidden).toBe(false)
+  })
+
+  it('fonctionne sans localStorage du tout', async () => {
+    const { ui } = await load('')
+    ui.setMode('planifier')
+    expect(ui.getUi().tab).toBe('planter')
+  })
+
+  it('changer de mode choisit l’onglet par défaut et ajoute une entrée d’historique', async () => {
+    const { b, ui } = await load('')
+    ui.setMode('entretenir')
+    expect(ui.getUi()).toMatchObject({ mode: 'entretenir', tab: 'entretien' })
+    expect(b.current().hash).toBe('#entretien')
+    expect(b.length()).toBe(2)
+    ui.setMode('planifier')
+    expect(ui.getUi().tab).toBe('planter')
+    b.back()
+    expect(ui.getUi()).toMatchObject({ mode: 'entretenir', tab: 'entretien' })
+    b.back()
+    expect(ui.getUi()).toMatchObject({ mode: 'jardin', tab: 'carte' })
+  })
+
+  it('cliquer le mode déjà actif sur un de ses onglets ne change rien', async () => {
+    const { b, ui } = await load('')
+    ui.setUi({ tab: 'plantes' })
+    const len = b.length()
+    ui.setMode('jardin')
+    expect(ui.getUi().tab).toBe('plantes')
+    expect(b.length()).toBe(len)
+  })
+
+  it('un onglet hors du mode courant bascule dans le bon mode', async () => {
+    const { ui } = await load('')
+    ui.setMode('entretenir')
+    ui.setUi({ tab: 'carte', focusPlantId: 'p1' }) // « Voir sur la carte »
+    expect(ui.getUi().mode).toBe('jardin')
+    ui.setUi({ tab: 'entretien' })
+    expect(ui.getUi().mode).toBe('entretenir')
+    ui.setUi({ tab: 'planter' })
+    expect(ui.getUi().mode).toBe('planifier')
+  })
+
+  it('un onglet commun à deux modes garde le mode courant ; Réglages et Catalogue n’en changent aucun', async () => {
+    const { ui } = await load('')
+    ui.setMode('planifier')
+    ui.setUi({ tab: '3d' })
+    expect(ui.getUi().mode).toBe('planifier')
+    ui.setUi({ tab: 'reglages' })
+    expect(ui.getUi().mode).toBe('planifier')
+    ui.setMode('entretenir')
+    ui.setUi({ tab: 'plantes' })
+    expect(ui.getUi().mode).toBe('entretenir')
+    ui.setUi({ tab: 'catalogue' })
+    expect(ui.getUi().mode).toBe('entretenir')
+  })
+
+  it('le hash d’un lien direct fixe le mode (#entretien, #planter)', async () => {
+    expect((await load('#entretien')).ui.getUi().mode).toBe('entretenir')
+    expect((await load('#planter')).ui.getUi().mode).toBe('planifier')
+    expect((await load('#reglages')).ui.getUi().mode).toBe('jardin')
+  })
+
+  it('Retour restitue le mode de l’écran retrouvé', async () => {
+    const { b, ui } = await load('')
+    ui.setUi({ tab: 'entretien' })
+    ui.setUi({ tab: 'carte' })
+    expect(ui.getUi().mode).toBe('jardin')
+    b.back()
+    expect(ui.getUi()).toMatchObject({ tab: 'entretien', mode: 'entretenir' })
+  })
+
+  it('mémorise le mode et le relit au lancement suivant', async () => {
+    const storage = memoryStorage()
+    const first = await load('', storage)
+    first.ui.setMode('planifier')
+    expect(storage.data.get('pj.mode')).toBe('planifier')
+    const second = await load('', storage)
+    expect(second.ui.getUi().mode).toBe('planifier')
+  })
+
+  it('ignore un mode mémorisé invalide', async () => {
+    const { ui } = await load('', memoryStorage({ 'pj.mode': 'nimporte', 'pj.guide': '{pas du json' }))
+    expect(ui.getUi().mode).toBe('jardin')
+    expect(ui.getUi().guide.stepsHidden).toBe(true)
+  })
+
+  it('applyDefaultMode : sans mémoire, choisit selon les plantes et l’écran d’ouverture', async () => {
+    const few = await load('', memoryStorage())
+    few.ui.applyDefaultMode(1)
+    expect(few.ui.getUi()).toMatchObject({ mode: 'jardin', tab: 'carte' })
+
+    const storage = memoryStorage()
+    const many = await load('', storage)
+    many.ui.applyDefaultMode(8)
+    expect(many.ui.getUi()).toMatchObject({ mode: 'entretenir', tab: 'entretien' })
+    expect(many.b.current().hash).toBe('#entretien')
+    expect(many.b.length()).toBe(1) // remplacement, pas d'empilement
+    expect(storage.data.get('pj.mode')).toBe('entretenir')
+  })
+
+  it('applyDefaultMode ne touche pas à un mode mémorisé ni à un hash explicite', async () => {
+    const kept = await load('', memoryStorage({ 'pj.mode': 'jardin' }))
+    kept.ui.applyDefaultMode(20)
+    expect(kept.ui.getUi().mode).toBe('jardin')
+    const explicit = await load('#plantes', memoryStorage())
+    explicit.ui.applyDefaultMode(20)
+    expect(explicit.ui.getUi()).toMatchObject({ mode: 'entretenir', tab: 'plantes' })
+  })
+
+  it('applyDefaultMode préserve un hash de lien magique', async () => {
+    const b = await load('#access_token=abc&type=magiclink', memoryStorage())
+    b.ui.applyDefaultMode(20)
+    expect(b.b.current().hash).toBe('#access_token=abc&type=magiclink')
+  })
+})
+
+describe('repères mémorisés (guide)', () => {
+  it('noteVisit retient la 3D et Entretien par jardin, sans doublon', async () => {
+    const storage = memoryStorage()
+    const { ui } = await load('', storage)
+    ui.noteVisit('3d', 'g1')
+    ui.noteVisit('3d', 'g1')
+    ui.noteVisit('entretien', 'g1')
+    ui.noteVisit('carte', 'g1')
+    expect(ui.getUi().guide.opened3d).toEqual(['g1'])
+    expect(ui.getUi().guide.openedEntretien).toEqual(['g1'])
+    const again = await load('', storage)
+    expect(again.ui.getUi().guide.opened3d).toEqual(['g1'])
+  })
+
+  it('« Plus tard » repousse la proposition de 7 jours', async () => {
+    const { ui } = await load('')
+    const t0 = Date.now()
+    ui.setGuide({ nudgeUntil: t0 + ui.NUDGE_SNOOZE_MS })
+    expect(ui.getUi().guide.nudgeUntil - t0).toBe(7 * 86400000)
+  })
+
+  it('showFirstSteps rouvre la checklist sur « Mon jardin »', async () => {
+    const { ui } = await load('')
+    ui.setMode('entretenir')
+    ui.showFirstSteps()
+    expect(ui.getUi().guide).toMatchObject({ stepsHidden: false, stepsOpen: true })
+    expect(ui.getUi()).toMatchObject({ mode: 'jardin', tab: 'carte' })
   })
 })

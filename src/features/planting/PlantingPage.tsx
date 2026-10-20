@@ -2,7 +2,8 @@ import { lazy, Suspense, useMemo } from 'react'
 import { SPECIES, SPECIES_BY_ID } from '../../data/species'
 import { CATEGORY_LABEL, SUN_LABEL } from '../../data/labels'
 import { useGardenPlants } from '../../lib/store'
-import { openSpecies, setUi, useUi } from '../../lib/ui'
+import { openSpecies, setMode, setUi, useUi } from '../../lib/ui'
+import { PlaceAction } from '../../components/PlaceAction'
 import { aspectLabel, slopeAt } from '../../lib/terrain'
 import { doyToLabel } from '../../lib/weather'
 import { obstaclesFor, seasonalSunHours } from '../../engine/sun'
@@ -164,10 +165,37 @@ function BestForSpot({ garden }: { garden: Garden }) {
   )
 }
 
+/** Explication quand le jardin n'est pas (encore) modélisé : le calcul marche quand même, en moins précis. */
+function ModelHint({ garden }: { garden: Garden }) {
+  const plants = useGardenPlants(garden.id)
+  const noParcel = !garden.parcel?.length
+  const noPlants = plants.length === 0
+  if (!noParcel && !noPlants) return null
+  return (
+    <div className="card empty-hint">
+      <p style={{ marginTop: 0 }}>
+        <strong>Planifier est plus précis quand le jardin est modélisé.</strong>
+      </p>
+      <p className="small" style={{ marginBottom: 12 }}>
+        {noParcel ? "Sans la parcelle, les distances aux voisins ne sont pas vérifiées. " : ''}
+        {noPlants ? "Sans plantes placées, l'ensoleillement ignore l'ombre de vos arbres et les compagnons ne sont pas comptés. " : ''}
+        C'est facultatif : vous pouvez planifier dès maintenant.
+      </p>
+      <div className="row">
+        <PlaceAction>Placer une plante</PlaceAction>
+        <button className="btn" onClick={() => setMode('jardin')}>
+          Voir Mon jardin
+        </button>
+      </div>
+    </div>
+  )
+}
+
 export function PlantingPage({ garden }: { garden: Garden }) {
   return (
     <div className="page">
       <h1>Choisir et planter</h1>
+      <ModelHint garden={garden} />
       <div className="grid cols-2" style={{ alignItems: 'start' }}>
         <BestForSpot garden={garden} />
         <SowNow garden={garden} />

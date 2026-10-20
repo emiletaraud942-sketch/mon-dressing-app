@@ -28,6 +28,7 @@ export function GardenDataBanner({ garden, compact }: { garden: Garden; compact?
             ))}
           </ul>
         )}
+        {compact && noParcel && <div className="small">Vous pouvez quand même placer vos plantes : la parcelle est facultative.</div>}
         {failedAgain.length > 0 && <div className="small muted">Nouvel essai sans succès : {failedAgain.map((s) => s.detail || s.label).join(' · ')}</div>}
       </div>
       <button className="btn small" onClick={refresh} disabled={busy}>

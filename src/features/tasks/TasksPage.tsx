@@ -10,6 +10,7 @@ import { setUi } from '../../lib/ui'
 import { MONTH_NAMES } from '../../engine/calendar'
 import { waterBalance, yearPlan } from '../../engine/tasks'
 import type { Garden, GeneratedTask, TaskType, WeatherBundle } from '../../types'
+import { PlaceAction } from '../../components/PlaceAction'
 import { useTasks } from './useTasks'
 import { doneTaskLabel } from './taskLabel'
 
@@ -171,10 +172,11 @@ export function TasksPage({ garden }: { garden: Garden }) {
           {weatherError && <div className="alert small">Météo indisponible ({weatherError}) : les tâches sont calculées sans conditions météo.</div>}
           {plants.length === 0 ? (
             <div className="card empty">
-              <p>Ajoutez vos plantes sur la carte : l'appli calculera quand les tailler, désherber, arroser et récolter.</p>
-              <button className="btn primary" onClick={() => setUi({ tab: 'carte' })}>
-                Aller à la carte
-              </button>
+              <p>
+                <strong>Entretenir commence quand vos plantes sont placées.</strong>
+              </p>
+              <p>L'appli calculera alors quand les tailler, désherber, arroser et récolter.</p>
+              <PlaceAction>Aller les placer</PlaceAction>
             </div>
           ) : (
             <div className="card">
