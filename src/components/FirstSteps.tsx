@@ -16,17 +16,15 @@ export function FirstSteps({ garden }: { garden: Garden }) {
   const open = guide.stepsOpen
   return (
     <section className="firststeps" aria-label="Premiers pas">
-      <div className="guide-head">
-        <button className="guide-toggle" aria-expanded={open} aria-controls="firststeps-list" onClick={() => setGuide({ stepsOpen: !open })}>
-          <strong>Premiers pas</strong>
-          <span className="muted small">
-            {done} sur {progress.steps.length}
-          </span>
-          <span className={'chev' + (open ? ' up' : '')} aria-hidden>
-            <Icon name="chevron" size={18} />
-          </span>
-        </button>
-      </div>
+      <button className="guide-toggle" aria-expanded={open} aria-controls="firststeps-list" onClick={() => setGuide({ stepsOpen: !open })}>
+        <strong>Premiers pas</strong>
+        <span className="muted small">
+          {done} sur {progress.steps.length}
+        </span>
+        <span className={'chev' + (open ? ' up' : '')} aria-hidden>
+          <Icon name="chevron" size={18} />
+        </span>
+      </button>
       {open && (
         <>
           <ul className="steps-list" id="firststeps-list">
@@ -40,7 +38,7 @@ export function FirstSteps({ garden }: { garden: Garden }) {
                     {s.label}
                     <span className="sr-only">{s.done ? ' : fait' : ' : à faire'}</span>
                   </span>
-                  {!s.done && <span className="muted small">{s.hint}</span>}
+                  {s.id === progress.next?.id && <span className="muted small">{s.hint}</span>}
                 </span>
                 <StepButton step={s} garden={garden} />
               </li>

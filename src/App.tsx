@@ -2,7 +2,6 @@ import { lazy, Suspense, useEffect, useState } from 'react'
 import { notifyDailyTasks } from './lib/notify'
 import { Icon } from './components/Icon'
 import { ErrorBoundary } from './components/ErrorBoundary'
-import { FirstSteps } from './components/FirstSteps'
 import { HelpSheet } from './components/HelpSheet'
 import { Modal } from './components/Modal'
 import { ModeSwitch } from './components/ModeSwitch'
@@ -79,7 +78,7 @@ export function App() {
   const loaded = useStore((s) => s.loaded)
   const gardens = useStore((s) => s.gardens)
   const garden = useActiveGarden()
-  const { tab, mode } = useUi()
+  const { tab, mode, placingSpeciesId } = useUi()
   const plantCount = useGardenPlants(garden?.id).length
   const { tasks, weather, weatherLoading } = useTasks(garden)
   const [moreOpen, setMoreOpen] = useState(false)
@@ -168,10 +167,9 @@ export function App() {
       </header>
       <div className="modebar">
         <ModeSwitch mode={mode} openTasks={open} />
-        {mode === 'jardin' && MODE_TABS.jardin.includes(tab) && (
+        {mode === 'jardin' && MODE_TABS.jardin.includes(tab) && !placingSpeciesId && (
           <div className="guide">
             <ProgressCard garden={garden} />
-            <FirstSteps garden={garden} />
           </div>
         )}
       </div>

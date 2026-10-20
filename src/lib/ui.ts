@@ -50,7 +50,7 @@ function writePref(key: string, value: string) {
 
 /** Aides et repères mémorisés : cartes repliées, « plus tard », écrans déjà ouverts. */
 export interface GuideState {
-  /** Jauge de progression dépliée. */
+  /** Détails de la jauge (prochaine étape, Premiers pas) dépliés. */
   progressOpen: boolean
   /** Checklist « Premiers pas » masquée par l'utilisateur (ou jamais affichée). */
   stepsHidden: boolean
@@ -61,7 +61,7 @@ export interface GuideState {
   opened3d: string[]
   openedEntretien: string[]
 }
-const DEFAULT_GUIDE: GuideState = { progressOpen: true, stepsHidden: true, stepsOpen: true, nudgeUntil: 0, opened3d: [], openedEntretien: [] }
+const DEFAULT_GUIDE: GuideState = { progressOpen: false, stepsHidden: true, stepsOpen: true, nudgeUntil: 0, opened3d: [], openedEntretien: [] }
 export const NUDGE_SNOOZE_MS = 7 * 86400000
 
 function readGuide(): GuideState {
@@ -259,7 +259,7 @@ export function noteVisit(tab: Tab, gardenId: string) {
 
 /** Réaffiche la checklist « Premiers pas » (ouverte) sur « Mon jardin ». */
 export function showFirstSteps() {
-  setGuide({ stepsHidden: false, stepsOpen: true })
+  setGuide({ stepsHidden: false, stepsOpen: true, progressOpen: true })
   setMode('jardin')
 }
 
