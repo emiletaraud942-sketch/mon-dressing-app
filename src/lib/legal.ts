@@ -276,7 +276,7 @@ export interface ConsentText {
 const idf = DATA_INVENTORY.find((d) => d.id === 'identification')
 const compte = DATA_INVENTORY.find((d) => d.id === 'compte')
 
-export const CONSENT_TEXT: Record<'plantnet' | 'sync', ConsentText> = {
+export const CONSENT_TEXT: Record<'plantnet' | 'sync' | 'voisins', ConsentText> = {
   plantnet: {
     titre: 'Envoyer la photo à Pl@ntNet ?',
     paragraphes: [
@@ -292,6 +292,15 @@ export const CONSENT_TEXT: Record<'plantnet' | 'sync', ConsentText> = {
       'Vos jardins, plantes et tâches (sans les photos) seront enregistrés sur un serveur (Supabase, UE) lié à votre adresse e-mail, pour les retrouver sur un autre appareil.',
       `Destinataire : ${(compte?.destinataires ?? []).join(' ; ')}.`,
       'Vous pouvez retirer ce consentement et supprimer vos données en ligne à tout moment dans Réglages.',
+    ],
+    accepter: 'Accepter et continuer',
+  },
+  voisins: {
+    titre: 'Rejoindre l’entraide entre voisins ?',
+    paragraphes: [
+      'Votre adresse e-mail (pour le lien de connexion), votre pseudo, votre quartier arrondi à ~1 km, vos annonces, photos, réponses et messages privés seront enregistrés sur un serveur dédié (Supabase, UE). Votre adresse et votre position exacte ne sont jamais envoyées.',
+      'Votre pseudo, votre quartier, vos annonces et vos réponses sont visibles des autres membres. Vos messages ne sont lus que par votre correspondant. Les annonces disparaissent après 60 jours.',
+      'Vous pouvez retirer ce consentement dans Réglages > Vie privée, et supprimer votre compte et vos annonces à tout moment dans l’entraide.',
     ],
     accepter: 'Accepter et continuer',
   },

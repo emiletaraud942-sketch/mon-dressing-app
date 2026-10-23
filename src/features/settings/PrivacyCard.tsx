@@ -6,10 +6,12 @@ import { showToast } from '../../lib/toast'
 import { eraseAllData, type EraseReport } from '../../lib/security/erase'
 import { DATA_INVENTORY, PERMISSIONS } from '../../lib/security/inventory'
 import { consentDate, revokeConsent, useConsents, type ConsentId } from '../../lib/consent'
+import { neighborsEnabled } from '../../lib/neighbors/enabled'
 import { DRAFT_NOTE, NETWORK_INFO } from '../../lib/legal'
 import { LegalLink, LegalLinks } from '../legal/LegalLinks'
 
 const syncConfigured = !!import.meta.env.VITE_SUPABASE_URL && !!import.meta.env.VITE_SUPABASE_ANON_KEY
+const voisinsConfigured = neighborsEnabled
 
 const STEP_LABEL: Record<string, string> = {
   remote: 'Sauvegarde en ligne',
@@ -101,6 +103,7 @@ function EraseDialog({ onClose }: { onClose: () => void }) {
 const CONSENT_ROWS: { id: ConsentId; label: string; visible: boolean }[] = [
   { id: 'plantnet', label: 'Envoi de photos à Pl@ntNet', visible: true },
   { id: 'sync', label: 'Synchronisation en ligne', visible: syncConfigured },
+  { id: 'voisins', label: 'Entraide entre voisins', visible: voisinsConfigured },
 ]
 
 function Consents() {

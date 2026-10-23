@@ -3,8 +3,6 @@
 -- Principes : RLS sur chaque table, politiques par (select auth.uid()), droits au plus juste (colonnes comprises),
 -- aucune adresse ni coordonnée exacte (cellule de ~1 km, arrondie à 0,01° par déclencheur).
 
-create extension if not exists pgcrypto;
-
 -- ============================================================
 -- 1. Tables
 -- ============================================================
@@ -13,12 +11,26 @@ create extension if not exists pgcrypto;
 create table if not exists public.profiles (
   user_id    uuid primary key references auth.users (id) on delete cascade,
   pseudo     text not null
-             check (char_length(pseudo) between 3 and 24 and pseudo = btrim(pseudo) and pseudo !~ '[[:cntrl:]<>]'),
+             constraint profiles_pseudo_check check (
+               char_length(pseudo) between 3 and 24 and pseudo = btrim(pseudo)
+               and pseudo !~ '[[:cntrl:]<>]'
+               -- caractères invisibles ou de direction (usurpation d'identité visuelle) ; au moins une lettre ou un chiffre
+               and pseudo !~ '[\u00ad\u034f\u061c\u115f\u1160\u17b4\u17b5\u180e\u200b-\u200f\u2028-\u202e\u2060-\u206f\u3164\ufeff\uffa0]'
+               and pseudo ~ '[[:alnum:]]'
+             ),
   cell_lat   numeric(6, 2) not null check (cell_lat between -90 and 90),
   cell_lon   numeric(7, 2) not null check (cell_lon between -180 and 180),
   banned_at  timestamptz,                      -- posé par l'éditeur seulement (aucun droit client sur cette colonne)
   created_at timestamptz not null default now()
 );
+-- Mise à niveau d'une base créée avec l'ancienne contrainte de pseudo.
+alter table public.profiles drop constraint if exists profiles_pseudo_check;
+alter table public.profiles add constraint profiles_pseudo_check check (
+  char_length(pseudo) between 3 and 24 and pseudo = btrim(pseudo)
+  and pseudo !~ '[[:cntrl:]<>]'
+  and pseudo !~ '[\u00ad\u034f\u061c\u115f\u1160\u17b4\u17b5\u180e\u200b-\u200f\u2028-\u202e\u2060-\u206f\u3164\ufeff\uffa0]'
+  and pseudo ~ '[[:alnum:]]'
+) not valid;
 create unique index if not exists profiles_pseudo_key on public.profiles (lower(pseudo));
 
 -- Annonces : don, échange, prêt, question.
@@ -106,6 +118,8 @@ create table if not exists public.quotas (
 -- ============================================================
 create index if not exists posts_feed_idx     on public.posts (kind, cell_lat, cell_lon, created_at desc) where status = 'open';
 create index if not exists posts_author_idx   on public.posts (author);
+create index if not exists posts_photo_idx    on public.posts (photo_path) where photo_path is not null;
+create index if not exists posts_expires_idx  on public.posts (expires_at);
 create index if not exists replies_post_idx   on public.replies (post_id, created_at);
 create index if not exists replies_author_idx on public.replies (author);
 create index if not exists threads_a_idx      on public.threads (user_a);

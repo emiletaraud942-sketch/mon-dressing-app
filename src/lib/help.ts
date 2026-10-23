@@ -78,6 +78,17 @@ export const HELP: Record<Tab, HelpContent> = {
       'Créez un autre jardin avec « Nouveau jardin ».',
     ],
   },
+  voisins: {
+    title: 'L’entraide entre voisins',
+    steps: [
+      'Connectez-vous avec votre e-mail : un lien arrive, ouvrez-le dans ce navigateur.',
+      'Choisissez un pseudo et votre quartier (arrondi à ~1 km, jamais votre adresse).',
+      'Le fil montre les dons, échanges, prêts et questions autour de vous. Réglez le rayon.',
+      '« Publier » crée une annonce. « Écrire en privé » ouvre une conversation.',
+      '« Signaler » et « Bloquer » protègent le groupe. Rien ne se vend ici.',
+      'Dans Profil : supprimez votre compte et toutes vos annonces quand vous voulez.',
+    ],
+  },
 }
 
 export const HELP_SCREENS = Object.keys(HELP) as Tab[]

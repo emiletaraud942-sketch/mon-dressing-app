@@ -1,9 +1,10 @@
 import { useSyncExternalStore } from 'react'
 import type { Category, XY } from '../types'
 import type { LegalId } from './legal'
+import { neighborsEnabled } from './neighbors/enabled'
 
 // État d'interface non persistant, partagé entre la carte, la 3D et les panneaux.
-export type Tab = 'carte' | '3d' | 'plantes' | 'entretien' | 'planter' | 'catalogue' | 'reglages'
+export type Tab = 'carte' | '3d' | 'plantes' | 'entretien' | 'planter' | 'catalogue' | 'reglages' | 'voisins'
 
 /** Mode d'affichage selon le stade : modéliser le jardin, l'entretenir, planifier. */
 export type Mode = 'jardin' | 'entretenir' | 'planifier'
@@ -16,7 +17,7 @@ export const MODE_TABS: Record<Mode, Tab[]> = {
   planifier: ['planter', 'catalogue', '3d'],
 }
 /** Toujours accessibles, quel que soit le mode (menu « Plus »). */
-export const ALWAYS_TABS: Tab[] = ['catalogue', 'reglages']
+export const ALWAYS_TABS: Tab[] = ['catalogue', 'reglages', 'voisins']
 export const DEFAULT_TAB: Record<Mode, Tab> = { jardin: 'carte', entretenir: 'entretien', planifier: 'planter' }
 /** En dessous de ce nombre de plantes, on ouvre sur « Mon jardin ». */
 export const MIN_PLANTS_FOR_CARE = 3
@@ -114,14 +115,18 @@ interface UiState {
   newGarden?: boolean
 }
 
-export const TABS: Tab[] = ['carte', '3d', 'plantes', 'entretien', 'planter', 'catalogue', 'reglages']
+export const TABS: Tab[] = ['carte', '3d', 'plantes', 'entretien', 'planter', 'catalogue', 'reglages', 'voisins']
+/** L'onglet « Voisins » n'existe que si l'entraide est configurée (variables VITE_NEIGHBORS_*). */
+export const tabAvailable = (t: Tab) => t !== 'voisins' || neighborsEnabled
+/** Alias de hash : le retour d'un lien magique de l'entraide arrive sur `#entraide`. */
+const HASH_ALIAS: Record<string, Tab> = { entraide: 'voisins' }
 const MAP_TABS: Tab[] = ['carte', '3d']
 
 /** Onglet désigné par un hash (`#plantes`, `#reglages#access_token=…`). Un hash inconnu (lien magique…) donne `undefined`. */
 export function parseHash(hash: string): Tab | undefined {
   const m = /^#?([a-z0-9]+)(?:[#&?/]|$)/.exec(hash)
-  const t = m?.[1] as Tab | undefined
-  return t && TABS.includes(t) ? t : undefined
+  const t = (HASH_ALIAS[m?.[1] ?? ''] ?? m?.[1]) as Tab | undefined
+  return t && TABS.includes(t) && tabAvailable(t) ? t : undefined
 }
 
 /** Ce qui est mémorisé dans chaque entrée d'historique. */
@@ -152,7 +157,7 @@ function initialUi(): UiState {
   const stored = readState()?.nav
   let tab: Tab
   let extra: Partial<UiState> = {}
-  if (stored && TABS.includes(stored.tab)) {
+  if (stored && TABS.includes(stored.tab) && tabAvailable(stored.tab)) {
     tab = stored.tab
     extra = { selectedPlantId: stored.selectedPlantId, speciesId: stored.speciesId }
   } else {
@@ -212,7 +217,7 @@ export function setUi(patch: Partial<Omit<UiState, 'guide'>>, opts: { push?: boo
 // Bouton Retour (Android, navigateur) : on restitue l'écran mémorisé dans l'entrée d'historique.
 window.addEventListener('popstate', (e) => {
   const s = (e.state as HistoryState | null)?.nav
-  const tab = s?.tab && TABS.includes(s.tab) ? s.tab : parseHash(location.hash) ?? 'carte'
+  const tab = s?.tab && TABS.includes(s.tab) && tabAvailable(s.tab) ? s.tab : parseHash(location.hash) ?? 'carte'
   let next: UiState = { ...ui, tab, mode: modeForTab(tab, ui.mode), selectedPlantId: s?.selectedPlantId, speciesId: s ? s.speciesId : ui.speciesId }
   if (!MAP_TABS.includes(tab)) next = clearPlacing(next)
   if (next.mode !== ui.mode) writePref(MODE_KEY, next.mode)

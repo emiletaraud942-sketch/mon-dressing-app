@@ -21,8 +21,10 @@ import { PlantingPage } from './features/planting/PlantingPage'
 import { CataloguePage } from './features/plants/CataloguePage'
 import { SettingsPage } from './features/settings/SettingsPage'
 import { LegalModal } from './features/legal/LegalModal'
+import { neighborsEnabled } from './lib/neighbors/enabled'
 
 const View3D = lazy(() => import('./features/garden3d/View3D'))
+const NeighborsPage = lazy(() => import('./features/neighbors/NeighborsPage').then((m) => ({ default: m.NeighborsPage })))
 const MapView = lazy(() => import('./features/map/MapView').then((m) => ({ default: m.MapView })))
 
 const Loading = ({ label }: { label: string }) => (
@@ -39,11 +41,12 @@ const NAV: Record<Tab, { label: string; icon: string }> = {
   planter: { label: 'Planter', icon: 'sprout' },
   catalogue: { label: 'Catalogue', icon: 'book' },
   reglages: { label: 'Réglages', icon: 'settings' },
+  voisins: { label: 'Voisins', icon: 'users' },
 }
-const MORE_LABEL: Partial<Record<Tab, string>> = { catalogue: 'Catalogue des espèces', reglages: 'Réglages et sauvegarde' }
+const MORE_LABEL: Partial<Record<Tab, string>> = { catalogue: 'Catalogue des espèces', reglages: 'Réglages et sauvegarde', voisins: 'Entraide entre voisins' }
 
 /** Catalogue et Réglages restent accessibles dans tous les modes : barre du bas si le mode les contient, sinon menu « Plus ». */
-const extraTabs = (mode: Mode) => ALWAYS_TABS.filter((t) => !MODE_TABS[mode].includes(t))
+const extraTabs = (mode: Mode) => ALWAYS_TABS.filter((t) => !MODE_TABS[mode].includes(t) && (t !== 'voisins' || neighborsEnabled))
 
 const NEW_GARDEN = '__new'
 
@@ -222,6 +225,11 @@ export function App() {
           {tab === 'planter' && <PlantingPage garden={garden} />}
           {tab === 'catalogue' && <CataloguePage garden={garden} />}
           {tab === 'reglages' && <SettingsPage garden={garden} />}
+          {tab === 'voisins' && neighborsEnabled && (
+            <Suspense fallback={<Loading label="Chargement de l’entraide…" />}>
+              <NeighborsPage garden={garden} />
+            </Suspense>
+          )}
         </ErrorBoundary>
       </main>
       <div className="overlay-stack">
