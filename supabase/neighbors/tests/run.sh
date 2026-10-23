@@ -14,7 +14,8 @@ OUT=$(mktemp)
   psql -q -v ON_ERROR_STOP=1 -f "$MIG" &&
   psql -q -v ON_ERROR_STOP=1 -f harness.sql &&
   psql -q -v ON_ERROR_STOP=1 -f "$MIG" &&   # idempotence : deuxième application
-  psql -q -f scenarios.sql
+  psql -q -f scenarios.sql &&
+  psql -q -f scenarios_audit.sql
 } >"$OUT" 2>&1
 grep -E "PASS|FAIL|ERROR" "$OUT" | sed 's/^psql:[^ ]* //'
 FAILS=$(grep -c "FAIL\|ERROR" "$OUT"); PASSES=$(grep -c "PASS" "$OUT")

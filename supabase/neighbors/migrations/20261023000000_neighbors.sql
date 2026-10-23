@@ -165,6 +165,8 @@ $$;
 
 -- Lecture limitée à ~55 km autour de son propre quartier (rayon maximal de l'appli : 50 km).
 -- Empêche un seul compte d'aspirer toutes les annonces, donc tous les pseudos et quartiers, du pays.
+-- 0,5° de latitude = ~55 km. En longitude, 1° raccourcit avec la latitude : la fenêtre est 0,55° / cos(latitude)
+-- (plafonnée à 6° près des pôles). Une fenêtre fixe de 1,5° couvrait ~112 km d'est en ouest à Paris, soit le double de ce qui est annoncé.
 create or replace function public.neighbors_can_see_cell(lat numeric, lon numeric)
 returns boolean
 language sql stable security definer
@@ -173,8 +175,34 @@ as $$
   select exists (
     select 1 from public.profiles p
     where p.user_id = (select auth.uid()) and p.banned_at is null
-      and abs(p.cell_lat - lat) <= 0.5 and abs(p.cell_lon - lon) <= 1.5
+      and abs(p.cell_lat - lat) <= 0.5
+      and abs(p.cell_lon - lon) <= least(0.55 / greatest(cos(radians(p.cell_lat::double precision)), 0.09), 6)
   );
+$$;
+
+-- Peut-on écrire à cette personne ? Oui si elle est membre (non bannie), sans blocage, et si l'appelant voit déjà d'elle une annonce
+-- ouverte ou une réponse sous une annonce visible. Fonction séparée : une politique de « threads » qui interrogerait « profiles »
+-- (dont la politique lit « threads ») provoquerait « infinite recursion detected in policy ».
+create or replace function public.neighbors_can_contact(other uuid)
+returns boolean
+language sql stable security definer
+set search_path = ''
+as $$
+  select (select public.neighbors_is_member())
+    and other is distinct from (select auth.uid())
+    and not public.neighbors_is_blocked(other)
+    and exists (select 1 from public.profiles o where o.user_id = other and o.banned_at is null)
+    and (
+      exists (
+        select 1 from public.posts p
+        where p.author = other and p.status = 'open' and p.expires_at > now() and public.neighbors_can_see_cell(p.cell_lat, p.cell_lon)
+      )
+      or exists (
+        select 1 from public.replies r join public.posts p on p.id = r.post_id
+        where r.author = other and r.status = 'open' and p.status = 'open' and p.expires_at > now()
+          and public.neighbors_can_see_cell(p.cell_lat, p.cell_lon)
+      )
+    );
 $$;
 
 -- Nombre de fichiers de l'appelant dans le bucket. Fonction séparée : une politique de storage.objects qui lirait
@@ -416,6 +444,10 @@ begin
     where m.id = new.target_id and new.reporter in (t.user_a, t.user_b);
   end if;
   if target_owner is null then
+    -- Annonce, réponse, profil : même réponse que la politique RLS pour un contenu invisible (pas de sondage d'identifiants).
+    if new.target_kind in ('post', 'reply', 'profile') then
+      raise exception 'new row violates row-level security policy for table "reports"' using errcode = '42501';
+    end if;
     raise exception 'report_target_not_found' using errcode = 'P0001';
   end if;
   if target_owner = new.reporter then
@@ -483,6 +515,8 @@ revoke all on function public.neighbors_is_member() from public, anon;
 revoke all on function public.neighbors_is_blocked(uuid) from public, anon;
 revoke all on function public.neighbors_can_see_cell(numeric, numeric) from public, anon;
 grant execute on function public.neighbors_can_see_cell(numeric, numeric) to authenticated;
+revoke all on function public.neighbors_can_contact(uuid) from public, anon;
+grant execute on function public.neighbors_can_contact(uuid) to authenticated;
 revoke all on function public.neighbors_my_photo_count() from public, anon;
 grant execute on function public.neighbors_my_photo_count() to authenticated;
 grant execute on function public.neighbors_is_member() to authenticated;
@@ -547,8 +581,13 @@ create policy profiles_select on public.profiles for select to authenticated usi
   )
 );
 drop policy if exists profiles_insert on public.profiles;
+-- Les connexions anonymes de Supabase ont le rôle « authenticated » : elles ne créent jamais de profil (défense en profondeur,
+-- en plus de leur désactivation dans le tableau de bord).
 create policy profiles_insert on public.profiles for insert to authenticated
-  with check (user_id = (select auth.uid()));
+  with check (
+    user_id = (select auth.uid())
+    and coalesce(((select auth.jwt()) ->> 'is_anonymous')::boolean, false) = false
+  );
 drop policy if exists profiles_update on public.profiles;
 create policy profiles_update on public.profiles for update to authenticated
   using (user_id = (select auth.uid()) and (select public.neighbors_is_member()))
@@ -609,7 +648,14 @@ create policy threads_insert on public.threads for insert to authenticated with 
   (select auth.uid()) in (user_a, user_b)
   and (select public.neighbors_is_member())
   and not public.neighbors_is_blocked(case when user_a = (select auth.uid()) then user_b else user_a end)
-  and (post_id is null or exists (select 1 from public.posts p where p.id = threads.post_id))   -- annonce visible de l'appelant
+  -- On n'écrit qu'à une personne dont le profil est déjà visible (annonce, réponse ou conversation visible) : connaître un
+  -- identifiant ne suffit pas pour contacter quelqu'un hors zone ou banni, ni pour lire son pseudo et son quartier.
+  and (select public.neighbors_can_contact(case when threads.user_a = (select auth.uid()) then threads.user_b else threads.user_a end))
+  -- Annonce citée : visible de l'appelant ET écrite par l'un des deux participants (pas un contexte trompeur).
+  and (post_id is null or exists (
+    select 1 from public.posts p
+    where p.id = threads.post_id and p.author in (threads.user_a, threads.user_b)
+  ))
 );
 
 -- messages : lisibles des seuls participants ; envoi par un participant, en son nom.
@@ -635,6 +681,7 @@ create policy reports_insert on public.reports for insert to authenticated
     and case reports.target_kind
       when 'post'  then exists (select 1 from public.posts p where p.id = reports.target_id)
       when 'reply' then exists (select 1 from public.replies r where r.id = reports.target_id)
+      when 'profile' then exists (select 1 from public.profiles pr where pr.user_id = reports.target_id)
       else true
     end
   );
@@ -643,8 +690,13 @@ create policy reports_insert on public.reports for insert to authenticated
 drop policy if exists blocks_select on public.blocks;
 create policy blocks_select on public.blocks for select to authenticated using (blocker = (select auth.uid()));
 drop policy if exists blocks_insert on public.blocks;
+-- On ne bloque qu'une personne dont le profil est visible : sinon l'insertion révélerait le pseudo (copié par déclencheur)
+-- de n'importe quel identifiant connu.
 create policy blocks_insert on public.blocks for insert to authenticated
-  with check (blocker = (select auth.uid()));
+  with check (
+    blocker = (select auth.uid())
+    and exists (select 1 from public.profiles pr where pr.user_id = blocks.blocked)
+  );
 drop policy if exists blocks_delete on public.blocks;
 create policy blocks_delete on public.blocks for delete to authenticated using (blocker = (select auth.uid()));
 

@@ -157,7 +157,7 @@ begin
  perform t.expect('S13 banni: ne modifie plus son profil', t.as(A,'update public.profiles set pseudo=''Alicia'''), 'OK rows=0');
  perform t.expect('S13 banni: ne lit plus les annonces des autres', t.as(A,'select count(*) from public.posts where author<>'''||A||''''), 'OK 0');
  perform t.expect('S13 banni: ne peut plus envoyer', t.as(A,'insert into public.messages(thread_id,body) values ('''||tid||''',''x'')'), 'ERR 42501');
- perform t.expect('S13 banni: ne signale plus', t.as(A,'insert into public.blocks(blocked) values ('''||C||''')'), 'OK rows=1'); -- blocage accepté (pas de nuisance)
+ perform t.expect('S13 banni: ne bloque plus (ne voit plus personne)', t.as(A,'insert into public.blocks(blocked) values ('''||C||''')'), 'ERR 42501');
  perform t.expect('S13 journal: bannissement tracé', (select 'OK '||count(*) from public.moderation_log where action='ban' and target_id=A), 'OK 1');
  update public.profiles set banned_at = null where user_id = A;
  perform t.expect('S13 journal: levée tracée', (select 'OK '||count(*) from public.moderation_log where action='unban' and target_id=A), 'OK 1');
@@ -193,7 +193,8 @@ begin
  perform t.expect('S12 annonce avec photo', t.as(A,'insert into public.posts(kind,title,photo_path) values (''don'',''Photo'','''||f||''')'), 'OK rows=1');
  perform t.expect('S12 B lit la photo de l''annonce visible (seule)', t.as(B,'select count(*) from storage.objects'), 'OK 1');
  perform t.expect('S12 D (loin) ne la lit pas', t.as(D,'select count(*) from storage.objects'), 'OK 0');
- delete from public.blocks; perform t.expect('S12 C bloqué par A', t.as(A,'insert into public.blocks(blocked) values ('''||C||''')'), 'OK rows=1');
+ delete from public.blocks; perform set_config('request.jwt.claim.sub','',true); insert into public.blocks(blocker, blocked) values (A, C); -- inséré par l'éditeur : C n'a aucun contenu visible de A (voir scenarios_audit.sql)
+ perform t.expect('S12 C bloqué par A (ligne présente)', (select 'OK '||count(*) from public.blocks where blocker=A and blocked=C), 'OK 1');
  perform t.expect('S12 C bloqué ne la lit pas', t.as(C,'select count(*) from storage.objects'), 'OK 0');
  delete from public.blocks;
  -- orphelins
