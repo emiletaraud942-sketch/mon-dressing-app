@@ -90,7 +90,9 @@ export function translateError(e: unknown): string {
   // Messages déjà en français (http.ts : délai dépassé, connexion impossible) ou erreurs locales.
   if (e instanceof NeighborsError) return e.message
   // Messages français produits par src/lib/http.ts (jamais un message brut du serveur).
-  if (e instanceof Error && /^(Le service met trop de temps à répondre|Connexion impossible)\./.test(msg)) return msg
+  // PostgREST enveloppe l'erreur réseau dans un objet simple (« Error: Connexion impossible… ») : on reconnaît la phrase, on renvoie un texte fixe.
+  if (/(?:^|: )Connexion impossible\./.test(msg)) return 'Connexion impossible. Vérifiez votre accès à Internet.'
+  if (/(?:^|: )Le service met trop de temps à répondre\./.test(msg)) return 'Le service met trop de temps à répondre. Réessayez dans un instant.'
   return 'Une erreur est survenue. Réessayez dans un instant.'
 }
 

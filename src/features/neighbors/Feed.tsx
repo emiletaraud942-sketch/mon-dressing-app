@@ -15,10 +15,12 @@ export function PostCard({ post, onOpen }: { post: Post; onOpen: (p: Post) => vo
         <span className="small muted">{post.distanceLabel}</span>
         {post.photoPath && <span className="badge">Photo</span>}
       </span>
-      <strong className="nb-card-title">{post.title}</strong>
+      <strong className="nb-card-title">
+        <bdi>{post.title}</bdi>
+      </strong>
       {species && <span className="small muted">{species.nomCommun}</span>}
       <span className="small muted">
-        {post.mine ? 'Vous' : post.authorPseudo} · {formatWhen(post.createdAt)}
+        {post.mine ? 'Vous' : <bdi>{post.authorPseudo}</bdi>} · {formatWhen(post.createdAt)}
       </span>
     </button>
   )

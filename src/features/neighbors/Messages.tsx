@@ -36,7 +36,9 @@ export function ThreadList({ online, onOpen }: { online: boolean; onOpen: (t: Th
         {threads.map((t) => (
           <li key={t.id}>
             <button className="nb-card" onClick={() => onOpen(t)}>
-              <strong className="nb-card-title">{t.otherPseudo}</strong>
+              <strong className="nb-card-title">
+                <bdi>{t.otherPseudo}</bdi>
+              </strong>
               <span className="small muted">Dernier message {formatWhen(t.lastMessageAt)}</span>
             </button>
           </li>
@@ -91,7 +93,9 @@ export function ThreadView({ thread, postTitle, online, onBack }: { thread: Thre
       </button>
       <div className="card stack">
         <div className="row">
-          <h2 style={{ margin: 0, flex: 1 }}>{thread.otherPseudo}</h2>
+          <h2 style={{ margin: 0, flex: 1 }}>
+            <bdi>{thread.otherPseudo}</bdi>
+          </h2>
           <button className="btn small tall" onClick={() => setDialog({ k: 'report-person' })}>
             Signaler
           </button>
@@ -99,7 +103,7 @@ export function ThreadView({ thread, postTitle, online, onBack }: { thread: Thre
             Bloquer
           </button>
         </div>
-        {postTitle && <p className="small muted" style={{ margin: 0 }}>À propos de : {postTitle}</p>}
+        {postTitle && <p className="small muted" style={{ margin: 0 }}>À propos de : <bdi>{postTitle}</bdi></p>}
         {error && <ErrorBox message={error} onRetry={reload} />}
         {loading && !data && <Spinner label="Chargement des messages…" />}
         {data && messages.length === 0 && <p className="muted" style={{ margin: 0 }}>Pas encore de message. Présentez-vous et dites ce qui vous intéresse.</p>}

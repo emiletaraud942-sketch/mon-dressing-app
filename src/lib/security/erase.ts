@@ -1,6 +1,7 @@
 // « Effacer toutes mes données » (droit à l'effacement, RGPD art. 17) : tout ce que l'appli garde sur l'appareil,
 // et, sur demande, l'instantané ou le compte en ligne. Chaque étape est indépendante : un échec n'empêche pas les autres.
 import { wipeLocalData } from '../store'
+import { neighborsEnabled } from '../neighbors/enabled'
 import { ERASABLE_CACHE, ERASABLE_LOCAL_KEY } from './inventory'
 
 export interface EraseOptions {
@@ -78,6 +79,14 @@ export async function eraseAllData(opts: EraseOptions = {}): Promise<EraseReport
       const sync = await import('../sync')
       if (opts.remote === 'account') await sync.deleteMyAccount()
       else await sync.deleteRemoteSnapshot()
+    })
+  }
+
+  // 1 bis. Entraide entre voisins : déconnexion (jeton révoqué tant que la session existe). Sans configuration, rien n'est chargé.
+  if (neighborsEnabled) {
+    await run('signout', async () => {
+      const api = await import('../neighbors/api')
+      await api.signOut()
     })
   }
 

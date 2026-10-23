@@ -20,10 +20,18 @@ export function PostDetail({ post, online, onBack, onChat }: { post: Post; onlin
 
   useEffect(() => {
     let alive = true
+    let url: string | null = null
     setPhoto(undefined)
-    if (post.photoPath) void getPhotoUrl(post.photoPath).then((u) => alive && setPhoto(u))
+    if (post.photoPath) {
+      void getPhotoUrl(post.photoPath).then((u) => {
+        url = u
+        if (alive) setPhoto(u)
+        else if (u) URL.revokeObjectURL(u)
+      })
+    } else setPhoto(null)
     return () => {
       alive = false
+      if (url) URL.revokeObjectURL(url) // URL blob: libérée au démontage ou au changement d'annonce
     }
   }, [post.photoPath])
 
@@ -52,9 +60,11 @@ export function PostDetail({ post, online, onBack, onChat }: { post: Post; onlin
           <span className="small muted">{post.distanceLabel}</span>
           {post.status !== 'open' && <span className="badge warn">{post.status === 'closed' ? 'Terminée' : 'Masquée'}</span>}
         </div>
-        <h2 style={{ margin: 0 }}>{post.title}</h2>
+        <h2 style={{ margin: 0 }}>
+          <bdi>{post.title}</bdi>
+        </h2>
         <p className="small muted" style={{ margin: 0 }}>
-          {post.mine ? 'Vous' : post.authorPseudo} · {formatWhen(post.createdAt)}
+          {post.mine ? 'Vous' : <bdi>{post.authorPseudo}</bdi>} · {formatWhen(post.createdAt)}
         </p>
         {post.photoPath && photo === undefined && <Spinner label="Chargement de la photo…" />}
         {photo && <img className="nb-photo" src={photo} alt={`Photo de l’annonce : ${post.title}`} />}
@@ -78,7 +88,7 @@ export function PostDetail({ post, online, onBack, onChat }: { post: Post; onlin
               Signaler
             </button>
             <button className="btn danger" onClick={() => setDialog({ k: 'block', id: post.authorId, pseudo: post.authorPseudo })}>
-              Bloquer {post.authorPseudo}
+              Bloquer <bdi>{post.authorPseudo}</bdi>
             </button>
           </div>
         ) : (
@@ -98,7 +108,7 @@ export function PostDetail({ post, online, onBack, onChat }: { post: Post; onlin
             {replyList.map((r) => (
               <li key={r.id}>
                 <p className="small muted" style={{ margin: 0 }}>
-                  <strong>{r.mine ? 'Vous' : r.authorPseudo}</strong> · {formatWhen(r.createdAt)}
+                  <strong>{r.mine ? 'Vous' : <bdi>{r.authorPseudo}</bdi>}</strong> · {formatWhen(r.createdAt)}
                 </p>
                 <p className="nb-body">{r.body}</p>
                 <div className="row">

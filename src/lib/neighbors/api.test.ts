@@ -98,6 +98,9 @@ describe('translateError', () => {
   it('laisse passer un message déjà français (délai http.ts)', () => {
     expect(api.translateError(new Error('Le service met trop de temps à répondre. Réessayez dans un instant.'))).toContain('trop de temps')
   })
+  it('reconnaît l’erreur réseau enveloppée par PostgREST (hors ligne)', () => {
+    expect(api.translateError({ message: 'Error: Connexion impossible. Vérifiez votre accès à Internet.', details: '', hint: '', code: '' })).toContain('Connexion impossible')
+  })
 })
 
 describe('validation', () => {

@@ -37,7 +37,9 @@ export function ProfileTab({ profile, email, garden, online, onSaved }: { profil
         <h2>Mon profil</h2>
         <dl className="nb-dl">
           <dt>Pseudo</dt>
-          <dd>{profile.pseudo}</dd>
+          <dd>
+            <bdi>{profile.pseudo}</bdi>
+          </dd>
           <dt>Quartier</dt>
           <dd>
             {describeCell(profile.cell)} <span className="small muted">(~1 km)</span>
@@ -81,7 +83,7 @@ export function ProfileTab({ profile, email, garden, online, onSaved }: { profil
         <ul className="list">
           {blocked.map((b) => (
             <li key={b.userId} className="row" style={{ justifyContent: 'space-between' }}>
-              <span>{b.pseudo ?? 'Ancien voisin'}</span>
+              <bdi>{b.pseudo ?? 'Ancien voisin'}</bdi>
               <button
                 className="btn small tall"
                 disabled={!online}

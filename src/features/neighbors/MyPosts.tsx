@@ -54,7 +54,7 @@ export function MyPosts({ online, onOpen, onNew }: { online: boolean; onOpen: (p
                 <span className={'badge ' + (st.tone === 'neutral' ? '' : st.tone)}>{st.label}</span>
               </div>
               <button className="link-btn nb-mine-title" onClick={() => onOpen(p)}>
-                {p.title}
+                <bdi>{p.title}</bdi>
               </button>
               <span className="small muted">Publiée {formatWhen(p.createdAt)}</span>
               <div className="row">
@@ -89,7 +89,7 @@ export function MyPosts({ online, onOpen, onNew }: { online: boolean; onOpen: (p
             reload()
           }}
         >
-          <p style={{ margin: 0 }}>« {deleting.title} » et sa photo seront supprimées. Cela ne rend pas votre quota du jour.</p>
+          <p style={{ margin: 0 }}>« <bdi>{deleting.title}</bdi> » et sa photo seront supprimées. Cela ne rend pas votre quota du jour.</p>
         </Confirm>
       )}
     </div>
