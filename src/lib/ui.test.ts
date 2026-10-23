@@ -83,6 +83,13 @@ describe('onglet Voisins (entraide)', () => {
     expect(ui.parseHash('#entraide')).toBeUndefined()
     expect(ui.getUi().tab).toBe('carte')
   })
+  it('la clé publique peut aussi venir de VITE_NEIGHBORS_SUPABASE_PUBLIC_TOKEN', async () => {
+    vi.stubEnv('VITE_NEIGHBORS_SUPABASE_URL', 'https://x.supabase.co')
+    vi.stubEnv('VITE_NEIGHBORS_SUPABASE_ANON_KEY', '')
+    vi.stubEnv('VITE_NEIGHBORS_SUPABASE_PUBLIC_TOKEN', 'cle')
+    const { ui } = await load('#voisins')
+    expect(ui.tabAvailable('voisins')).toBe(true)
+  })
   it('présent quand configuré : #voisins et le retour #entraide ouvrent l’onglet, dans « Plus »', async () => {
     vi.stubEnv('VITE_NEIGHBORS_SUPABASE_URL', 'https://x.supabase.co')
     vi.stubEnv('VITE_NEIGHBORS_SUPABASE_ANON_KEY', 'cle')

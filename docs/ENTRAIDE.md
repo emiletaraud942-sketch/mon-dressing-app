@@ -2,7 +2,7 @@
 
 Fonction facultative : annonces de don, échange, prêt et questions entre jardiniers d'un même quartier.
 Elle repose sur un **projet Supabase dédié**, distinct de la synchro privée (`src/lib/sync.ts`, inchangée).
-Sans `VITE_NEIGHBORS_SUPABASE_URL` et `VITE_NEIGHBORS_SUPABASE_ANON_KEY`, la fonction est masquée et l'appli marche comme avant.
+Sans `VITE_NEIGHBORS_SUPABASE_URL` et `VITE_NEIGHBORS_SUPABASE_PUBLIC_TOKEN` (la clé publique « anon » / « publishable » ; l'ancien nom `VITE_NEIGHBORS_SUPABASE_ANON_KEY` marche aussi, mais Vercel peut le refuser à cause du mot « KEY »), la fonction est masquée et l'appli marche comme avant.
 
 Code : `src/lib/neighbors/{types,cell,client,api}.ts`. Base : `supabase/neighbors/migrations/20261023000000_neighbors.sql`.
 
