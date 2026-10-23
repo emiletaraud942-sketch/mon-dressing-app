@@ -24,7 +24,7 @@ create unique index if not exists profiles_pseudo_key on public.profiles (lower(
 -- Annonces : don, échange, prêt, question.
 create table if not exists public.posts (
   id         uuid primary key default gen_random_uuid(),
-  author     uuid not null default (select auth.uid()) references public.profiles (user_id) on delete cascade,
+  author     uuid not null default auth.uid() references public.profiles (user_id) on delete cascade,
   kind       text not null check (kind in ('don', 'echange', 'pret', 'question')),
   title      text not null check (char_length(btrim(title)) between 1 and 80),
   body       text not null default '' check (char_length(body) <= 1000),
@@ -42,7 +42,7 @@ create table if not exists public.posts (
 create table if not exists public.replies (
   id         uuid primary key default gen_random_uuid(),
   post_id    uuid not null references public.posts (id) on delete cascade,
-  author     uuid not null default (select auth.uid()) references public.profiles (user_id) on delete cascade,
+  author     uuid not null default auth.uid() references public.profiles (user_id) on delete cascade,
   body       text not null check (char_length(btrim(body)) between 1 and 1000),
   status     text not null default 'open' check (status in ('open', 'hidden')),
   created_at timestamptz not null default now()
@@ -63,7 +63,7 @@ create table if not exists public.threads (
 create table if not exists public.messages (
   id         uuid primary key default gen_random_uuid(),
   thread_id  uuid not null references public.threads (id) on delete cascade,
-  sender     uuid not null default (select auth.uid()) references public.profiles (user_id) on delete cascade,
+  sender     uuid not null default auth.uid() references public.profiles (user_id) on delete cascade,
   body       text not null check (char_length(btrim(body)) between 1 and 1000),
   created_at timestamptz not null default now()
 );
@@ -71,7 +71,7 @@ create table if not exists public.messages (
 -- Signalements : un par utilisateur et par cible.
 create table if not exists public.reports (
   id          uuid primary key default gen_random_uuid(),
-  reporter    uuid not null default (select auth.uid()) references public.profiles (user_id) on delete cascade,
+  reporter    uuid not null default auth.uid() references public.profiles (user_id) on delete cascade,
   target_kind text not null check (target_kind in ('post', 'reply', 'profile', 'message')),
   target_id   uuid not null,
   reason      text not null check (reason in ('spam', 'abus', 'dangereux', 'commerce', 'autre')),
@@ -81,7 +81,7 @@ create table if not exists public.reports (
 );
 
 create table if not exists public.blocks (
-  blocker    uuid not null default (select auth.uid()) references public.profiles (user_id) on delete cascade,
+  blocker    uuid not null default auth.uid() references public.profiles (user_id) on delete cascade,
   blocked    uuid not null references public.profiles (user_id) on delete cascade,
   created_at timestamptz not null default now(),
   primary key (blocker, blocked),
@@ -274,24 +274,24 @@ returns trigger language plpgsql security definer
 set search_path = ''
 as $$
 declare
-  owner uuid;
+  target_owner uuid;
 begin
   if new.target_kind = 'post' then
-    select author into owner from public.posts where id = new.target_id;
+    select author into target_owner from public.posts where id = new.target_id;
   elsif new.target_kind = 'reply' then
-    select author into owner from public.replies where id = new.target_id;
+    select author into target_owner from public.replies where id = new.target_id;
   elsif new.target_kind = 'profile' then
-    select user_id into owner from public.profiles where user_id = new.target_id;
+    select user_id into target_owner from public.profiles where user_id = new.target_id;
   else
     -- Message : le signaleur doit être l'un des deux participants, et pas l'expéditeur.
-    select m.sender into owner
+    select m.sender into target_owner
     from public.messages m join public.threads t on t.id = m.thread_id
     where m.id = new.target_id and new.reporter in (t.user_a, t.user_b);
   end if;
-  if owner is null then
+  if target_owner is null then
     raise exception 'report_target_not_found' using errcode = 'P0001';
   end if;
-  if owner = new.reporter then
+  if target_owner = new.reporter then
     raise exception 'report_self' using errcode = 'P0001';
   end if;
   new.created_at := now();
@@ -349,11 +349,9 @@ grant execute on function public.neighbors_is_blocked(uuid) to authenticated;
 revoke all on public.profiles, public.posts, public.replies, public.threads, public.messages,
               public.reports, public.blocks, public.quotas from public, anon, authenticated;
 
-grant select on public.profiles to authenticated;
 grant insert (user_id, pseudo, cell_lat, cell_lon) on public.profiles to authenticated;
 grant update (pseudo, cell_lat, cell_lon) on public.profiles to authenticated;
--- banned_at : aucun droit client (ni lecture par les autres via l'API : colonne retirée ci-dessous).
-revoke select on public.profiles from authenticated;
+-- banned_at : aucun droit client, ni en lecture ni en écriture.
 grant select (user_id, pseudo, cell_lat, cell_lon, created_at) on public.profiles to authenticated;
 
 grant select, delete on public.posts to authenticated;
@@ -407,7 +405,7 @@ create policy profiles_insert on public.profiles for insert to authenticated
   with check (user_id = (select auth.uid()));
 drop policy if exists profiles_update on public.profiles;
 create policy profiles_update on public.profiles for update to authenticated
-  using (user_id = (select auth.uid()) and banned_at is null)
+  using (user_id = (select auth.uid()) and (select public.neighbors_is_member()))
   with check (user_id = (select auth.uid()));
 
 -- posts
