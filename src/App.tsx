@@ -20,6 +20,7 @@ import { useTasks } from './features/tasks/useTasks'
 import { PlantingPage } from './features/planting/PlantingPage'
 import { CataloguePage } from './features/plants/CataloguePage'
 import { SettingsPage } from './features/settings/SettingsPage'
+import { LegalModal } from './features/legal/LegalModal'
 
 const View3D = lazy(() => import('./features/garden3d/View3D'))
 const MapView = lazy(() => import('./features/map/MapView').then((m) => ({ default: m.MapView })))
@@ -131,6 +132,7 @@ export function App() {
         </div>
         <Onboarding />
         <ToastHost />
+        <LegalModal />
       </>
     )
   }
@@ -227,6 +229,7 @@ export function App() {
         <StorageBanner />
       </div>
       <ToastHost />
+      <LegalModal />
       {helpOpen && <HelpSheet tab={tab} onClose={() => setHelpOpen(false)} />}
       {moreOpen && <MoreSheet onClose={() => setMoreOpen(false)} onNewGarden={startNewGarden} />}
     </div>

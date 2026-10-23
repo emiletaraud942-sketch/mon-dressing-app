@@ -15,6 +15,9 @@ import type { Garden, SoilTexture } from '../../types'
 import { GardenCreator } from './GardenCreator'
 import { GardenDataBanner } from './GardenDataBanner'
 import { PrivacyCard } from './PrivacyCard'
+import { hasConsent } from '../../lib/consent'
+import { ConsentDialog } from '../legal/ConsentDialog'
+import { LegalLinks } from '../legal/LegalLinks'
 import { FAIL_HELP } from './createGarden'
 import { uniqueGardenName } from './gardenName'
 import { describeCounts, importQuestion } from './importSummary'
@@ -247,6 +250,7 @@ function Sync() {
   const [msg, setMsg] = useState<string>()
   const [conflict, setConflict] = useState<SyncConflictError>()
   const [busy, setBusy] = useState(false)
+  const [asking, setAsking] = useState<() => void>()
   useEffect(() => {
     if (!syncConfigured) return
     let alive = true
@@ -284,6 +288,11 @@ function Sync() {
       setBusy(false)
     }
   }
+  /** Première synchronisation : rien n'est envoyé au serveur avant l'accord de l'utilisateur. */
+  const withConsent = (action: () => void) => {
+    if (hasConsent('sync')) action()
+    else setAsking(() => action)
+  }
   const push = (force = false) =>
     run(async (m) => {
       await m.pushSnapshot({ force })
@@ -304,7 +313,7 @@ function Sync() {
         <>
           <p className="small">Connecté : {user.email}</p>
           <div className="row">
-            <button className="btn" disabled={busy} onClick={() => push()}>
+            <button className="btn" disabled={busy} onClick={() => withConsent(() => void push())}>
               Envoyer mes données
             </button>
             <button className="btn" disabled={busy} onClick={pull}>
@@ -348,7 +357,7 @@ function Sync() {
             <button
               className="btn"
               disabled={busy || !email.includes('@')}
-              onClick={() => run(async (m) => (await m.sendMagicLink(email), 'Lien de connexion envoyé : ouvrez-le dans ce même navigateur.'))}
+              onClick={() => withConsent(() => void run(async (m) => (await m.sendMagicLink(email), 'Lien de connexion envoyé : ouvrez-le dans ce même navigateur.')))}
             >
               Recevoir un lien
             </button>
@@ -362,6 +371,17 @@ function Sync() {
         <p className="small" role="status" style={{ marginTop: 8 }}>
           {msg}
         </p>
+      )}
+      {asking && (
+        <ConsentDialog
+          id="sync"
+          onAccept={() => {
+            const action = asking
+            setAsking(undefined)
+            action()
+          }}
+          onRefuse={() => setAsking(undefined)}
+        />
       )}
     </div>
   )
@@ -441,6 +461,9 @@ export function SettingsPage({ garden }: { garden: Garden }) {
           </div>
         </div>
       </div>
+      <footer className="legal-footer">
+        <LegalLinks />
+      </footer>
     </div>
   )
 }

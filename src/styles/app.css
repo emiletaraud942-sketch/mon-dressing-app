@@ -1481,3 +1481,83 @@ dialog.modal::backdrop {
 .error-screen .card p {
   color: var(--muted);
 }
+
+/* ---------- Pages légales et consentements ---------- */
+.legal-link {
+  background: none;
+  border: 0;
+  padding: 0 4px;
+  min-height: 40px;
+  display: inline-flex;
+  align-items: center;
+  color: var(--accent);
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+.legal-link:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+.legal-links {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 0 4px;
+  font-size: 0.85rem;
+}
+.legal-links-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.legal-footer {
+  margin: 16px 0 8px;
+}
+.legal-accept {
+  margin-bottom: 0;
+}
+.legal-accept .legal-link {
+  min-height: 40px;
+}
+.legal-doc {
+  overflow-wrap: anywhere;
+}
+.legal-doc h3 {
+  margin: 18px 0 6px;
+}
+.legal-doc p,
+.legal-doc ul {
+  margin: 6px 0;
+}
+.legal-doc ul {
+  padding-left: 20px;
+}
+.legal-doc li {
+  margin-bottom: 6px;
+}
+.legal-draft {
+  padding: 8px 12px;
+  border-radius: 10px;
+  background: var(--warn-soft);
+  color: var(--warn-text);
+}
+.legal-draft-note {
+  margin-bottom: 4px;
+}
+.consents h3 {
+  margin: 12px 0 0;
+  font-size: 1rem;
+}
+.consent-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.consent-actions {
+  justify-content: flex-end;
+}

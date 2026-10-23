@@ -5,6 +5,8 @@ import { identifyPlant, type Identification } from '../../lib/plantnet'
 import { deletePhoto, getPhoto, savePhoto } from '../../lib/photos'
 import { PhotoThumb } from '../../components/PhotoThumb'
 import { startPlacing } from '../../lib/ui'
+import { hasConsent } from '../../lib/consent'
+import { ConsentDialog } from '../legal/ConsentDialog'
 
 const ORGANS = [
   ['auto', 'Automatique'],
@@ -20,6 +22,7 @@ export function IdentifyDialog({ onClose }: { onClose: () => void }) {
   const [results, setResults] = useState<Identification[]>()
   const [error, setError] = useState<string>()
   const [busy, setBusy] = useState(false)
+  const [asking, setAsking] = useState(false)
 
   async function add(input: HTMLInputElement) {
     const files = Array.from(input.files ?? []).slice(0, 5 - photos.length)
@@ -41,6 +44,12 @@ export function IdentifyDialog({ onClose }: { onClose: () => void }) {
       setPhotos((p) => [...p, ...ids])
       setResults(undefined)
     }
+  }
+
+  /** Rien ne part vers Pl@ntNet sans accord : première utilisation = demande de consentement. */
+  function start() {
+    if (hasConsent('plantnet')) void run()
+    else setAsking(true)
   }
 
   async function run() {
@@ -73,7 +82,7 @@ export function IdentifyDialog({ onClose }: { onClose: () => void }) {
   return (
     <Modal title="Identifier une plante" onClose={close}>
       <p className="small muted">
-        Prenez 1 à 5 photos nettes de la même plante (feuille, fleur, fruit). L'identification utilise Pl@ntNet.
+        Prenez 1 à 5 photos nettes de la même plante (feuille, fleur, fruit). L'identification utilise Pl@ntNet : vos photos lui sont envoyées uniquement quand vous cliquez sur « Identifier », après votre accord.
       </p>
       <div className="row" style={{ marginBottom: 12 }}>
         {photos.map((id) => (
@@ -95,7 +104,7 @@ export function IdentifyDialog({ onClose }: { onClose: () => void }) {
             </option>
           ))}
         </select>
-        <button className="btn primary" disabled={photos.length === 0 || busy} onClick={run}>
+        <button className="btn primary" disabled={photos.length === 0 || busy} onClick={start}>
           {busy ? <span className="spinner" /> : <Icon name="search" />} Identifier
         </button>
       </div>
@@ -119,6 +128,16 @@ export function IdentifyDialog({ onClose }: { onClose: () => void }) {
             </li>
           ))}
         </ul>
+      )}
+      {asking && (
+        <ConsentDialog
+          id="plantnet"
+          onAccept={() => {
+            setAsking(false)
+            void run()
+          }}
+          onRefuse={() => setAsking(false)}
+        />
       )}
     </Modal>
   )

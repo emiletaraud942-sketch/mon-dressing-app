@@ -5,6 +5,9 @@ import { exportCurrentState } from '../../lib/backup'
 import { showToast } from '../../lib/toast'
 import { eraseAllData, type EraseReport } from '../../lib/security/erase'
 import { DATA_INVENTORY, PERMISSIONS } from '../../lib/security/inventory'
+import { consentDate, revokeConsent, useConsents, type ConsentId } from '../../lib/consent'
+import { DRAFT_NOTE, NETWORK_INFO } from '../../lib/legal'
+import { LegalLink, LegalLinks } from '../legal/LegalLinks'
 
 const syncConfigured = !!import.meta.env.VITE_SUPABASE_URL && !!import.meta.env.VITE_SUPABASE_ANON_KEY
 
@@ -95,6 +98,38 @@ function EraseDialog({ onClose }: { onClose: () => void }) {
   )
 }
 
+const CONSENT_ROWS: { id: ConsentId; label: string; visible: boolean }[] = [
+  { id: 'plantnet', label: 'Envoi de photos à Pl@ntNet', visible: true },
+  { id: 'sync', label: 'Synchronisation en ligne', visible: syncConfigured },
+]
+
+function Consents() {
+  const granted = useConsents()
+  return (
+    <div className="consents">
+      <h3>Mes consentements</h3>
+      <ul className="list small">
+        {CONSENT_ROWS.filter((r) => r.visible).map((r) => (
+          <li key={r.id} className="consent-row">
+            <div>
+              <strong>{r.label}</strong>
+              <div className="muted">
+                {granted[r.id] ? `Accordé${consentDate(r.id) ? ` le ${new Date(consentDate(r.id)!).toLocaleDateString('fr-FR')}` : ''}` : 'Non accordé : il sera demandé avant le prochain envoi'}
+              </div>
+            </div>
+            {granted[r.id] && (
+              <button className="btn small" onClick={() => revokeConsent(r.id)} aria-label={`Retirer mon consentement : ${r.label}`}>
+                Retirer mon consentement
+              </button>
+            )}
+          </li>
+        ))}
+      </ul>
+      <p className="muted small">Retirer un consentement n’efface aucune donnée.</p>
+    </div>
+  )
+}
+
 export function PrivacyCard() {
   const [erasing, setErasing] = useState(false)
   return (
@@ -103,6 +138,11 @@ export function PrivacyCard() {
       <p className="small">
         Vos jardins, plantes et photos restent <strong>dans ce navigateur</strong>. Rien n’est envoyé à un serveur sans votre action, sauf les services
         indispensables ci-dessous. Pas de compte obligatoire, pas de publicité, pas de traceur.
+      </p>
+      <p className="small">{NETWORK_INFO}</p>
+      <Consents />
+      <p className="small">
+        Texte complet : <LegalLink id="confidentialite" label="politique de confidentialité" />.
       </p>
       <details>
         <summary>Quelles données, où, pour qui ?</summary>
@@ -135,6 +175,8 @@ export function PrivacyCard() {
       <button className="btn danger" style={{ marginTop: 12 }} onClick={() => setErasing(true)}>
         <Icon name="trash" size={16} /> Effacer toutes mes données
       </button>
+      <p className="muted small legal-draft-note">{DRAFT_NOTE}</p>
+      <LegalLinks />
       {erasing && <EraseDialog onClose={() => setErasing(false)} />}
     </div>
   )

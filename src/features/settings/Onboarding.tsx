@@ -1,3 +1,4 @@
+import { LegalLink } from '../legal/LegalLinks'
 import { GardenCreator } from './GardenCreator'
 
 export function Onboarding() {
@@ -16,6 +17,10 @@ export function Onboarding() {
           Gratuit, sans compte. Vos données restent dans ce navigateur (export possible à tout moment).
         </p>
         <GardenCreator allowDemo />
+        <p className="muted small legal-accept">
+          En continuant, vous acceptez les <LegalLink id="cgu" label="conditions d’utilisation" /> et la{' '}
+          <LegalLink id="confidentialite" label="politique de confidentialité" />.
+        </p>
       </div>
     </div>
   )

@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { MODES_HELP, helpFor } from '../lib/help'
 import { showFirstSteps, type Tab } from '../lib/ui'
+import { LegalLinks } from '../features/legal/LegalLinks'
 import { Modal } from './Modal'
 
 /** Feuille d'aide du bouton « ? » : étapes de l'écran courant, explication des 3 modes, retour aux Premiers pas. */
@@ -30,6 +31,7 @@ export function HelpSheet({ tab, onClose }: { tab: Tab; onClose: () => void }) {
               À quoi servent les 3 modes ?
             </button>
           </div>
+          <LegalLinks onOpen={onClose} />
         </div>
       ) : (
         <div className="stack help-body">
