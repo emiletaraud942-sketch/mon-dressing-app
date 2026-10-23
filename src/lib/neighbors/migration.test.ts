@@ -25,7 +25,20 @@ describe('migration entraide : durcissement', () => {
   })
   it('seules les aides de politiques et la suppression de compte sont appelables par les connectés', () => {
     const granted = [...code.matchAll(/grant execute on function public\.(\w+)/g)].map((m) => m[1]).sort()
-    expect(granted).toEqual(['delete_my_account', 'neighbors_can_see_cell', 'neighbors_is_blocked', 'neighbors_is_member', 'neighbors_my_photo_count'])
+    expect(granted).toEqual(['delete_my_account', 'neighbors_can_contact', 'neighbors_can_see_cell', 'neighbors_is_blocked', 'neighbors_is_member', 'neighbors_my_photo_count'])
+  })
+  it('audit 2 : contact, blocage et signalement de profil exigent un profil déjà visible ; pas de profil anonyme', () => {
+    const policy = (name: string) => new RegExp(`create policy ${name} on public\\.\\w+ for insert to authenticated\\s+with check \\(([\\s\\S]*?)\\);`).exec(code)?.[1] ?? ''
+    expect(policy('threads_insert')).toMatch(/neighbors_can_contact\(/)
+    expect(policy('threads_insert')).toMatch(/p\.author in \(threads\.user_a, threads\.user_b\)/)
+    expect(policy('blocks_insert')).toMatch(/from public\.profiles pr where pr\.user_id = blocks\.blocked/)
+    expect(policy('reports_insert')).toMatch(/when 'profile' then exists \(select 1 from public\.profiles/)
+    expect(policy('profiles_insert')).toMatch(/is_anonymous/)
+  })
+  it('audit 2 : la fenêtre de longitude dépend de la latitude (pas de 1,5° fixe, soit ~112 km à Paris)', () => {
+    const fn = functions.find((f) => f.name === 'neighbors_can_see_cell')!.text
+    expect(fn).toMatch(/cos\(radians\(/)
+    expect(fn).not.toMatch(/<= 1\.5/)
   })
   it('chaque table publique a la RLS activée', () => {
     expect(tables.sort()).toEqual(['blocks', 'messages', 'moderation_log', 'posts', 'profiles', 'quotas', 'replies', 'reports', 'threads'])

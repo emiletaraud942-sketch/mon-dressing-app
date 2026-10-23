@@ -2,7 +2,7 @@
 // avec un message en français. Les limites sont vérifiées AVANT l'envoi ; la base les impose de toute façon (RLS, triggers).
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { compressToTarget } from '../photos'
-import { jpegMetadataSegments } from '../security/image'
+import { imageSize, jpegMetadataSegments, sizeWithinLimits } from '../security/image'
 import { cellBounds, cellDistanceKm, distanceLabel, isValidCoord, roundCell } from './cell'
 import { isNeighborsConfigured, neighborsClient, NEIGHBORS_STORAGE_KEY } from './client'
 import {
@@ -461,6 +461,10 @@ async function removePhotos(paths: string[]): Promise<void> {
   }
 }
 
+/** Notre appli envoie des photos de 1 280 px au plus : au-delà de 4 096 px (16 Mpx), le fichier ne vient pas de chez nous. */
+const SHOWN_PHOTO_MAX_SIDE = 4096
+const SHOWN_PHOTO_MAX_PIXELS = 16_000_000
+
 /**
  * Photo d'annonce sous forme d'URL `blob:` (ou null). Le fichier est téléchargé avec la session (bucket privé) :
  * pas de lien signé qui circule, et la CSP `img-src 'self' data: blob:` n'a pas à être élargie.
@@ -471,6 +475,10 @@ export async function getPhotoUrl(path: string | null): Promise<string | null> {
   try {
     const { data, error } = await sb().storage.from(PHOTO_BUCKET).download(path)
     if (error || !data || !/^image\/(jpeg|png|webp)$/.test(data.type) || data.size > L.photoMaxBytes) return null
+    // Le fichier vient d'un autre membre (son navigateur n'est pas le nôtre) : le type annoncé ne prouve rien. On lit l'en-tête
+    // (JPEG, PNG ou WebP réel) et on refuse une « bombe de décompression » avant que <img> ne la décode (saturation mémoire).
+    const size = imageSize(new Uint8Array(await data.slice(0, 65536).arrayBuffer()))
+    if (!size || !sizeWithinLimits(size, SHOWN_PHOTO_MAX_SIDE, SHOWN_PHOTO_MAX_PIXELS)) return null
     return URL.createObjectURL(data)
   } catch {
     return null

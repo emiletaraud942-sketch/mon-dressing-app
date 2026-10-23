@@ -79,6 +79,11 @@ beforeEach(async () => {
   set('profiles:select', ME)
 })
 
+/** En-tête JPEG minimal (SOI + SOF0) annonçant les dimensions données. */
+function jpegHeader(width: number, height: number): Uint8Array {
+  return new Uint8Array([0xff, 0xd8, 0xff, 0xc0, 0x00, 0x11, 0x08, height >> 8, height & 255, width >> 8, width & 255, 3, 1, 0x22, 0, 2, 0x11, 1, 3, 0x11, 1])
+}
+
 describe('translateError', () => {
   it.each([
     [{ message: 'quota_exceeded:post' }, '5 annonces par jour'],
@@ -312,10 +317,26 @@ describe('défauts corrigés (audit)', () => {
   it('getPhotoUrl : télécharge avec la session (pas de lien signé) et rend une URL blob', async () => {
     const createObjectURL = vi.fn(() => 'blob:x')
     vi.stubGlobal('URL', Object.assign(URL, { createObjectURL }))
-    state.download.mockResolvedValueOnce({ data: new Blob([new Uint8Array([1, 2])], { type: 'image/jpeg' }), error: null })
+    state.download.mockResolvedValueOnce({ data: new Blob([jpegHeader(800, 600)], { type: 'image/jpeg' }), error: null })
     const path = '11111111-1111-4111-8111-111111111111/aaaaaaa1-0000-4000-8000-000000000001.jpg'
     expect(await api.getPhotoUrl(path)).toBe('blob:x')
     expect(state.download).toHaveBeenCalledWith(path)
+    vi.unstubAllGlobals()
+  })
+  it('getPhotoUrl refuse une photo d’un autre membre qui n’est pas une vraie image ou qui est une bombe de décompression', async () => {
+    const createObjectURL = vi.fn(() => 'blob:x')
+    vi.stubGlobal('URL', Object.assign(URL, { createObjectURL }))
+    const path = '11111111-1111-4111-8111-111111111111/aaaaaaa1-0000-4000-8000-000000000001.jpg'
+    // Type annoncé « image/jpeg » mais contenu HTML / SVG : refusé.
+    state.download.mockResolvedValueOnce({ data: new Blob(['<svg xmlns="http://www.w3.org/2000/svg" onload="alert(1)"/>'], { type: 'image/jpeg' }), error: null })
+    expect(await api.getPhotoUrl(path)).toBeNull()
+    // En-tête JPEG valide mais 30 000 × 30 000 px (moins de 1 Mo de fichier) : refusé avant tout décodage.
+    state.download.mockResolvedValueOnce({ data: new Blob([jpegHeader(30000, 30000)], { type: 'image/jpeg' }), error: null })
+    expect(await api.getPhotoUrl(path)).toBeNull()
+    // En-tête tronqué (aucune dimension lisible) : refusé.
+    state.download.mockResolvedValueOnce({ data: new Blob([new Uint8Array([0xff, 0xd8, 0xff])], { type: 'image/jpeg' }), error: null })
+    expect(await api.getPhotoUrl(path)).toBeNull()
+    expect(createObjectURL).not.toHaveBeenCalled()
     vi.unstubAllGlobals()
   })
   it('getPhotoUrl refuse un chemin hors modèle, un type non image et une erreur', async () => {
