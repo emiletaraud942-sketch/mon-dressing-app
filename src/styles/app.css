@@ -1486,7 +1486,7 @@ dialog.modal::backdrop {
 .legal-link {
   background: none;
   border: 0;
-  padding: 0 4px;
+  padding: 0;
   min-height: 40px;
   display: inline-flex;
   align-items: center;
