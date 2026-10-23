@@ -106,6 +106,19 @@ create table if not exists public.quotas (
   primary key (user_id, action, day)
 );
 
+-- Journal de modération (lu et écrit par l'éditeur seulement : RLS sans politique, aucun droit client).
+-- Ne contient que des identifiants et un motif court, jamais le contenu signalé. Conservé 12 mois.
+create table if not exists public.moderation_log (
+  id          bigint generated always as identity primary key,
+  at          timestamptz not null default now(),
+  actor       text not null default 'editeur' check (actor in ('auto', 'editeur')),
+  action      text not null check (action in ('auto_hide', 'hide', 'restore', 'delete', 'ban', 'unban', 'warn', 'dismiss', 'legal_request', 'other')),
+  target_kind text check (target_kind is null or target_kind in ('post', 'reply', 'profile', 'message')),
+  target_id   uuid,
+  reason      text check (reason is null or char_length(reason) <= 500),
+  note        text check (note is null or char_length(note) <= 500)
+);
+
 -- ============================================================
 -- 2. Index
 -- ============================================================
@@ -122,6 +135,7 @@ create index if not exists messages_thread_idx on public.messages (thread_id, cr
 create index if not exists messages_sender_idx on public.messages (sender);
 create index if not exists reports_target_idx on public.reports (target_kind, target_id);
 create index if not exists blocks_blocked_idx on public.blocks (blocked);
+create index if not exists moderation_log_at_idx on public.moderation_log (at);
 
 -- ============================================================
 -- 3. Fonctions d'aide (security definer : search_path fixé, droits explicites)
@@ -251,6 +265,11 @@ begin
   if new.banned_at is not null and old.banned_at is null then
     update public.posts   set status = 'hidden' where author = new.user_id and status <> 'hidden';
     update public.replies set status = 'hidden' where author = new.user_id and status <> 'hidden';
+    insert into public.moderation_log (actor, action, target_kind, target_id, reason)
+    values ('editeur', 'ban', 'profile', new.user_id, 'bannissement : annonces et réponses masquées');
+  elsif new.banned_at is null and old.banned_at is not null then
+    insert into public.moderation_log (actor, action, target_kind, target_id, reason)
+    values ('editeur', 'unban', 'profile', new.user_id, 'bannissement levé (contenus masqués non rétablis)');
   end if;
   return new;
 end;
@@ -418,6 +437,7 @@ set search_path = ''
 as $$
 declare
   n integer;
+  hidden_rows integer := 0;
 begin
   -- Seuls comptent les signalements de comptes de plus de 24 h et non bannis (freine les faux comptes jetables).
   select count(distinct r.reporter) into n
@@ -427,8 +447,14 @@ begin
   if n >= 3 then
     if new.target_kind = 'post' then
       update public.posts set status = 'hidden' where id = new.target_id and status <> 'hidden';
+      get diagnostics hidden_rows = row_count;
     elsif new.target_kind = 'reply' then
       update public.replies set status = 'hidden' where id = new.target_id and status <> 'hidden';
+      get diagnostics hidden_rows = row_count;
+    end if;
+    if hidden_rows > 0 then
+      insert into public.moderation_log (actor, action, target_kind, target_id, reason)
+      values ('auto', 'auto_hide', new.target_kind, new.target_id, n || ' signalements de membres distincts');
     end if;
   end if;
   return new;
@@ -466,7 +492,7 @@ grant execute on function public.neighbors_is_blocked(uuid) to authenticated;
 -- 5. Droits (au plus juste, colonne par colonne pour l'écriture)
 -- ============================================================
 revoke all on public.profiles, public.posts, public.replies, public.threads, public.messages,
-              public.reports, public.blocks, public.quotas from public, anon, authenticated;
+              public.reports, public.blocks, public.quotas, public.moderation_log from public, anon, authenticated;
 
 grant insert (user_id, pseudo, cell_lat, cell_lon) on public.profiles to authenticated;
 grant update (pseudo, cell_lat, cell_lon) on public.profiles to authenticated;
@@ -504,6 +530,7 @@ alter table public.messages enable row level security;
 alter table public.reports  enable row level security;
 alter table public.blocks   enable row level security;
 alter table public.quotas   enable row level security;   -- sans politique : inaccessible à l'API
+alter table public.moderation_log enable row level security;   -- idem : réservé à l'éditeur
 
 -- profiles : le sien, ou celui d'une personne dont on voit déjà une annonce, une réponse ou une conversation (hors blocage).
 drop policy if exists profiles_select on public.profiles;
@@ -693,6 +720,7 @@ as $$
 begin
   delete from public.quotas where day < (now() at time zone 'utc')::date - 7;
   delete from public.reports where created_at < now() - interval '12 months';
+  delete from public.moderation_log where at < now() - interval '12 months';
   return query delete from public.posts where expires_at < now() returning photo_path;
 end;
 $$;

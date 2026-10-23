@@ -1,6 +1,6 @@
 # Sécurité et protection des données
 
-Référence tenue par l'agent `securite-donnees`. Tout durcissement a un test (vitest, ou script SQL) et une ligne dans le tableau « Menace → mesure → fichier ». Dernier audit : 18 octobre 2026.
+Référence tenue par l'agent `securite-donnees`. Tout durcissement a un test (vitest, ou script SQL) et une ligne dans le tableau « Menace → mesure → fichier ». Derniers audits : 18 octobre 2026 (synchro, API, proxys) et 23 octobre 2026 (entraide entre voisins, §8).
 
 Données sensibles de l'appli : adresse et position du domicile (jardin), photos, jeton de connexion Supabase, clé Pl@ntNet.
 Principes : moindre privilège, aucune donnée personnelle superflue, aucun secret hors variables d'environnement serveur, local d'abord (rien ne quitte l'appareil sans action de l'utilisateur).
@@ -28,6 +28,7 @@ Principes : moindre privilège, aucune donnée personnelle superflue, aucun secr
 | Fuite entre utilisateurs, accès anonyme, `TRUNCATE` (ignore la RLS) | RLS + politiques `to authenticated` par `(select auth.uid())` ; `revoke` des droits `anon`/`public` et de `truncate, references, trigger` ; contrainte « data est un objet JSON » ; fonction de déclencheur non appelable. **Prouvé** sur Postgres (§3) | `supabase/migrations/20261019000000_security_hardening.sql`, `docs/securite-rls-test.sql` |
 | Compte et adresse e-mail impossibles à supprimer | `delete_my_account()` (SECURITY DEFINER sans argument, n'efface que `auth.uid()`, réservée aux connectés) ; `deleteMyAccount()` côté client | migration ci-dessus, `sync.ts` |
 | Saisie d'adresse e-mail abusive envoyée à Supabase | Adresse validée et rognée avant l'appel ; `emailRedirectTo` construit sur notre propre origine (la liste blanche de redirections est côté Supabase, §6) | `sync.ts` · test « sendMagicLink refuse une adresse invalide » |
+| Entraide : lecture des messages d'autrui, usurpation, quotas contournés, énumération, aspiration des annonces, photos orphelines ou en excès, XSS, injection de filtre | Voir §8 (RLS sur 9 tables, droits par colonne, déclencheurs, politiques Storage resserrées, lecture limitée à ~55 km, identifiants validés en UUID). **Prouvé** sur Postgres 16 (159 contrôles) | `supabase/neighbors/migrations/20261023000000_neighbors.sql`, `supabase/neighbors/tests/run.sh`, `src/lib/neighbors/{api,migration}.test.ts` |
 | Dépendances vulnérables, workflow CI compromis | Dependabot hebdomadaire (npm + actions), CI en lecture seule sans secret ni `pull_request_target`, `npm ci --ignore-scripts`, audit de production | `.github/dependabot.yml`, `.github/workflows/ci.yml` |
 
 ## 2. Constats de l'audit (honnêtes)
@@ -42,7 +43,7 @@ Principes : moindre privilège, aucune donnée personnelle superflue, aucun secr
 - **Stockage persistant** : `navigator.storage.persist()` est appelé au chargement (comportement conservé). Chrome décide sans demander ; Firefox affiche une fenêtre de permission dès la première visite, sans contexte. À reconsidérer côté interface (le demander après la création du premier jardin).
 - **Message 503 de l'API** : il indique publiquement que la clé Pl@ntNet manque (et comment la configurer). Info faible, utile au propriétaire ; à rendre générique si l'appli devient publique.
 
-## 3. Supabase
+## 3. Supabase (synchronisation privée)
 
 - RLS activée, politiques `select/insert/update/delete` `to authenticated` avec `(select auth.uid()) = user_id`, aucun droit à `anon`, déclencheur `updated_at` serveur, contrainte de taille (5 Mo) et de forme (objet JSON).
 - **Test des règles** : `docs/securite-rls-test.sql` (base LOCALE jetable uniquement). Cas : A ne lit, n'insère pour B, ne modifie, ne supprime, ne réaffecte rien de B ; `anon` n'accède à rien ; `TRUNCATE` refusé ; `updated_at` non falsifiable ; `delete_my_account()` n'efface que le compte appelant. Exécuté ici sur PGlite (Postgres 16 en WebAssembly) avec un environnement imitant Supabase (rôles `anon`/`authenticated`, `auth.uid()`, privilèges par défaut `ALL`). Sans la migration n° 3 le test échoue (« tableau JSON accepté », « A a pu TRUNCATE ») ; avec elle il passe, y compris rejoué deux fois. Il n'a PAS été exécuté sur un vrai projet Supabase (consigne : rien n'est exécuté sur un projet réel).
@@ -104,3 +105,39 @@ Reste à faire :
 3. **Confidentialité** : afficher aussi le texte de `docs/CONFIDENTIALITE.md` (une fois complété) ; lien depuis l'écran d'accueil.
 4. **Consentements** : avant le premier envoi de photo à l'identification (« vos photos sont envoyées à Pl@ntNet via notre serveur ; PermaJardin ne les conserve pas ») et avant la première synchronisation (adresse et position envoyées à Supabase).
 5. Message d'erreur de `savePhoto` : « Cette photo est trop grande… » (nouveau cas).
+
+## 8. Entraide entre voisins (audit du 23 octobre 2026)
+
+Projet Supabase **dédié**, séparé de la synchro. Détail du schéma, des règles et de l'exploitation : `docs/ENTRAIDE.md`.
+
+**Méthode.** Lecture ligne à ligne de la migration et du client, puis exécution réelle sur un Postgres 16.15 jetable avec un faux environnement Supabase (rôles `anon`/`authenticated`/`service_role`, `auth.uid()` lu dans `request.jwt.claim.sub`, `storage.objects` avec RLS, privilèges par défaut `ALL` comme sur Supabase). `supabase/neighbors/tests/run.sh` applique la migration deux fois (idempotence) et rejoue 159 contrôles. Limites du banc : ce n'est pas PostgREST ni le service Storage (les en-têtes, le type MIME réel et la limite de taille sont appliqués par Storage, non testés ici), ni un vrai projet Supabase.
+
+**Défauts trouvés et corrigés**
+
+| # | Gravité | Défaut | Correction |
+| --- | --- | --- | --- |
+| 1 | Élevée | Politique Storage `select` : tout membre pouvait lister et lire **tous** les dossiers `<user_id>/` du bucket (énumération de tous les comptes, photos d'annonces masquées, bloquées ou expirées) | Lecture limitée à ses propres photos et à celles d'annonces visibles (RLS de `posts` appliquée) |
+| 2 | Élevée | Aspiration : un seul compte lisait toutes les annonces du pays (pseudos et quartiers de tous) | `neighbors_can_see_cell` : lecture dans ~55 km autour de son quartier ; 5 changements de profil par jour |
+| 3 | Élevée | `deleteMyAccount` ignorait l'erreur de `list`/`remove` du Storage (le SDK ne lève pas, il renvoie `{error}`) : compte supprimé et photos laissées | Toute erreur arrête l'opération ; boucle bornée ; test |
+| 4 | Moyenne | Pas de plafond de stockage : envois illimités de fichiers de 1 Mo, noms libres (sous-dossiers, `.html`) | Nom imposé `<uid>/<uuid>.jpg`, 20 fichiers par personne (fonction `neighbors_my_photo_count` : une sous-requête directe sur `storage.objects` provoque « infinite recursion detected in policy », constaté) |
+| 5 | Moyenne | Photos des annonces expirées jamais effacées : la purge SQL laissait les fichiers au-delà des 60 jours annoncés | `neighbors_purge_expired()` renvoie les chemins à effacer, `neighbors_orphan_photos()` liste les orphelins ; procédure quotidienne |
+| 6 | Moyenne | Les photos, servies par lien signé, étaient bloquées par la CSP (`img-src 'self' data: blob:`) ou auraient imposé d'élargir la CSP | `getPhotoUrl` télécharge avec la session et rend une URL `blob:` (type image vérifié) |
+| 7 | Moyenne | Un client pouvait consommer le quota d'une autre personne (le déclencheur s'exécutait avant le contrôle RLS) et sonder son état (`not_member`, `quota_exceeded`) | `neighbors_assert_self` au début de chaque déclencheur |
+| 8 | Moyenne | Faux comptes jetables : 3 comptes neufs masquaient n'importe quelle annonce | Seuls comptent les signalements de comptes de plus de 24 h et non bannis |
+| 9 | Moyenne | On pouvait signaler (et donc masquer) du contenu invisible pour soi (bloqué, hors zone) ; fil de discussion rattaché à une annonce invisible | `reports_insert` et `threads_insert` exigent un contenu visible de l'appelant |
+| 10 | Moyenne | Bannissement : le masquage des contenus était une étape manuelle (oubliable) ; aucune trace des décisions | Déclencheur de masquage au bannissement, table `moderation_log` (RLS sans accès client) |
+| 11 | Moyenne | `closePost`/`reopenPost` réussissaient en silence sur une annonce masquée (aucune ligne touchée) | Retour vérifié, erreur claire |
+| 12 | Faible | Pseudo : caractères invisibles ou de direction (usurpation visuelle), pseudo sans lettre | Contrainte SQL `profiles_pseudo_check` + validation client ; textes libres : marques de direction et contrôles retirés |
+| 13 | Faible | Identifiants venant de l'interface envoyés tels quels aux filtres PostgREST | `assertUuid` partout (aucune requête sinon), minuscules (l'ordre `user_a < user_b` en dépend) |
+| 14 | Faible | `reason in REPORT_REASONS` acceptait `constructor`, `toString`… ; cible de signalement non validée ; rayon NaN | `Object.hasOwn`, liste de cibles, rayon borné |
+| 15 | Faible | `translateError` renvoyait tout message serveur contenant une lettre accentuée | Seuls les messages de `http.ts` passent |
+| 16 | Faible | Nom de fichier de repli `Math.random` si `randomUUID` absent | UUID v4 par `getRandomValues`, sinon refus |
+| 17 | Faible | Extension `pgcrypto` créée sans besoin (`gen_random_uuid` est natif) | Supprimée |
+| 18 | Faible | Plus de 30 annonces ouvertes possibles par personne (5 par jour pendant 60 jours) | Plafond de 30 annonces ouvertes |
+| 19 | Faible | Signalements conservés sans limite | Purge à 12 mois (et journal de modération 12 mois) |
+
+**Ce qui a été attaqué sans succès (extraits des 159 contrôles)** : lecture de `profiles`, `posts`, `quotas`, `moderation_log` par `anon` ; appel RPC des fonctions de déclencheur, de `neighbors_take_quota`, de la purge ; insertion de `banned_at`, `cell_*`, `status`, `expires_at` ; `select banned_at`/`select *` sur `profiles` ; faux auteur sur annonce, réponse, message, signalement ; photo hors du dossier de l'auteur ou avec `..` ; 6e annonce du jour, suppression qui rend le quota (non) ; lecture d'une conversation par un tiers, envoi dans une conversation étrangère, modification ou suppression d'un message ; contournement d'un blocage (annonces, profil, réponses, conversation, nouvelle conversation) dans les deux sens ; faux blocage de pseudo ; réouverture d'une annonce masquée par son auteur ; suppression de signalements ; compte supprimé (cascade complète) ; compte banni (ne lit ni n'écrit).
+
+**Reste à la charge de l'éditeur** (non testable ici) : voir « Étapes pour le propriétaire » dans `docs/ENTRAIDE.md`, notamment région UE du projet, désactivation des connexions anonymes, SMTP, CAPTCHA, pas de Realtime, purge quotidienne avec effacement des fichiers.
+
+**Ce que l'interface doit faire** (non modifié ici) : appeler `URL.revokeObjectURL` sur les URL rendues par `getPhotoUrl` ; afficher pseudos et textes dans un élément isolé (`<bdi>` ou `unicode-bidi: isolate`) ; traiter l'erreur « annonce ne peut plus être modifiée » de `closePost`/`reopenPost` ; afficher le motif de limite `post_open` (déjà traduit par `translateError`) ; ajouter `sb-neighbors-auth-token` à la déconnexion lors de « Effacer toutes mes données » (la clé commence par `sb-` : elle est déjà effacée, mais la session côté serveur ne l'est pas ; appeler `signOut()` de l'entraide) ; ne jamais afficher `session.email` à un autre membre.

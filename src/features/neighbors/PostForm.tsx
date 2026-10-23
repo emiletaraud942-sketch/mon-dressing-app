@@ -93,6 +93,7 @@ export function PostForm({ online, onPublished, onCancel }: { online: boolean; o
         <div className="stack">
           <strong>Photo (facultatif)</strong>
           <input
+            className="input"
             type="file"
             accept="image/jpeg,image/png,image/webp"
             aria-label="Ajouter une photo"

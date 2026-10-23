@@ -28,7 +28,7 @@ describe('migration entraide : durcissement', () => {
     expect(granted).toEqual(['delete_my_account', 'neighbors_can_see_cell', 'neighbors_is_blocked', 'neighbors_is_member', 'neighbors_my_photo_count'])
   })
   it('chaque table publique a la RLS activée', () => {
-    expect(tables.sort()).toEqual(['blocks', 'messages', 'posts', 'profiles', 'quotas', 'replies', 'reports', 'threads'])
+    expect(tables.sort()).toEqual(['blocks', 'messages', 'moderation_log', 'posts', 'profiles', 'quotas', 'replies', 'reports', 'threads'])
     for (const t of tables) expect(code, t).toMatch(new RegExp(`alter table public\\.${t}\\s+enable row level security`))
   })
   it('aucun droit à anon ou public, aucun « grant all », aucune politique ouverte', () => {

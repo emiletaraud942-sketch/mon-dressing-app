@@ -131,6 +131,9 @@ begin
  perform t.expect('S9 compte récent ne compte pas', (select 'OK '||status from public.posts where id=pid), 'OK open');
  perform t.expect('S9 E signale (3e valide)', t.as(E,'insert into public.reports(target_kind,target_id,reason) values (''post'','''||pid||''',''abus'')'), 'OK rows=1');
  perform t.expect('S9 masquée', (select 'OK '||status from public.posts where id=pid), 'OK hidden');
+ perform t.expect('S9 journal: masquage automatique tracé', (select 'OK '||actor||' '||action||' '||target_kind||' '||reason from public.moderation_log where action='auto_hide'), 'OK auto auto_hide post 3 signalements');
+ perform t.expect('S9 journal inaccessible aux membres', t.as(B,'select * from public.moderation_log'), 'ERR 42501');
+ perform t.expect('S9 journal non inscriptible', t.as(B,'insert into public.moderation_log(action) values (''other'')'), 'ERR 42501');
  perform t.expect('S9 A (auteur) la voit encore', t.as(A,'select status from public.posts where id='''||pid||''''), 'OK hidden');
  perform t.expect('S9 A ne la rouvre pas', t.as(A,'update public.posts set status=''open'' where id='''||pid||''''), 'OK rows=0');
  perform t.expect('S9 C ne la voit plus', t.as(C,'select count(*) from public.posts where id='''||pid||''''), 'OK 0');
@@ -155,7 +158,9 @@ begin
  perform t.expect('S13 banni: ne lit plus les annonces des autres', t.as(A,'select count(*) from public.posts where author<>'''||A||''''), 'OK 0');
  perform t.expect('S13 banni: ne peut plus envoyer', t.as(A,'insert into public.messages(thread_id,body) values ('''||tid||''',''x'')'), 'ERR 42501');
  perform t.expect('S13 banni: ne signale plus', t.as(A,'insert into public.blocks(blocked) values ('''||C||''')'), 'OK rows=1'); -- blocage accepté (pas de nuisance)
+ perform t.expect('S13 journal: bannissement tracé', (select 'OK '||count(*) from public.moderation_log where action='ban' and target_id=A), 'OK 1');
  update public.profiles set banned_at = null where user_id = A;
+ perform t.expect('S13 journal: levée tracée', (select 'OK '||count(*) from public.moderation_log where action='unban' and target_id=A), 'OK 1');
  -- S10 définitions
  perform t.expect('S10 aucune fonction definer sans search_path', (select 'OK '||count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.prosecdef and not exists (select 1 from unnest(coalesce(p.proconfig,'{}')) cfg where cfg like 'search_path=%')), 'OK 0');
  perform t.expect('S10 aucune table sans RLS', (select 'OK '||count(*) from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname='public' and c.relkind='r' and not c.relrowsecurity), 'OK 0');

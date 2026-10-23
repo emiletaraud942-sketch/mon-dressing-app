@@ -132,12 +132,12 @@ export const DATA_INVENTORY: readonly DataItem[] = [
   },
   {
     id: 'entraide-moderation',
-    donnee: 'Entraide : signalements envoyés (motif, précisions facultatives), personnes bloquées, compteurs d’usage par jour',
-    stockage: 'Supabase de l’entraide (tables reports, blocks, quotas ; non lisibles par les autres membres)',
+    donnee: 'Entraide : signalements envoyés (motif, précisions facultatives), personnes bloquées, compteurs d’usage par jour, journal de modération (identifiants et décision, sans le contenu)',
+    stockage: 'Supabase de l’entraide (tables reports, blocks, quotas, moderation_log ; non lisibles par les autres membres)',
     destinataires: ['Supabase (sous-traitant)', 'L’éditeur (modération)'],
     finalite: 'Modérer les contenus (loi pour la confiance dans l’économie numérique), protéger les membres, limiter les abus',
     base: 'interet-legitime',
-    duree: 'Signalements : 12 mois. Blocages : jusqu’au déblocage ou à la suppression du compte. Compteurs : 7 jours',
+    duree: 'Signalements et journal de modération : 12 mois. Blocages : jusqu’au déblocage ou à la suppression du compte. Compteurs : 7 jours',
     effacement: 'Débloquer une personne ; suppression du compte (vos signalements et blocages disparaissent)',
   },
   {

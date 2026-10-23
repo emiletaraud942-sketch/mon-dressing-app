@@ -1,13 +1,14 @@
 # Politique de confidentialité
 
 > **BROUILLON À FAIRE VALIDER PAR UN PROFESSIONNEL.** Texte provisoire, à faire valider par un professionnel avant publication. Il ne constitue pas un avis juridique.
-> Version 1.0 · Dernière mise à jour : 23 octobre 2026.
+> Version 1.1 · Dernière mise à jour : 23 octobre 2026.
 
 ## En bref
 
 - Vos jardins, plantes et photos restent sur votre appareil, dans votre navigateur.
 - Pas de compte obligatoire, pas de publicité, pas de cookie, pas de traceur.
-- Quelques services extérieurs reçoivent une partie de vos données uniquement quand la fonction l’exige : carte, météo, identification d’une plante, sauvegarde en ligne facultative.
+- Quelques services extérieurs reçoivent une partie de vos données uniquement quand la fonction l’exige : carte, météo, identification d’une plante, sauvegarde en ligne facultative, entraide entre voisins facultative.
+- L’entraide entre voisins demande un compte (adresse e-mail) et un âge minimum de 15 ans. Elle ne reçoit ni votre adresse ni votre position exacte, seulement un quartier arrondi à environ 1 km.
 - Vous pouvez tout exporter ou tout effacer à tout moment depuis les Réglages.
 
 ## Qui est responsable
@@ -27,6 +28,11 @@ Pour chaque donnée : où elle est stockée, qui la reçoit, pourquoi, sur quell
 - Coordonnées du jardin (parcelle, altitude, bâtiments, orthophoto, tuiles de carte). Stockage : Dans le jardin créé ; tuiles IGN dans le cache du service worker (ign-tuiles, ign-ortho-3d). Destinataires : Vercel (proxys /ext/geopf, /ext/apicarto) ; IGN Géoplateforme et API Carto. Finalité : Afficher la carte, la parcelle, le relief et le bâti. Base : exécution du service demandé. Durée : Tuiles : 60 jours au plus dans le cache ; orthophoto 3D : 14 jours. Effacement : Effacer toutes mes données (vide aussi les caches de tuiles).
 - Coordonnées du jardin envoyées pour la météo et le climat local. Stockage : localStorage (clés pj-meteo:…, pj-climat:… : coordonnées arrondies à 3 décimales dans la clé). Destinataires : Vercel (proxys /ext/meteo, /ext/meteo-archive) ; Open-Meteo. Finalité : Prévisions et calcul des dates de gel pour proposer les tâches. Base : exécution du service demandé. Durée : Cache de 3 h (prévisions) et 30 jours (climat). Effacement : Effacer toutes mes données.
 - Adresse e-mail du compte, instantané en ligne des jardins (sans photos), jeton de session. Stockage : Supabase (table garden_snapshots, protégée par RLS) ; jeton dans le localStorage (clé sb-…-auth-token). Destinataires : Supabase (sous-traitant : hébergement et authentification). Finalité : Sauvegarder et retrouver ses jardins sur un autre appareil. Fonction facultative.. Base : votre consentement. Durée : Jusqu’à suppression du compte ou de l’instantané. Effacement : Réglages > Synchronisation : supprimer mes données en ligne (deleteRemoteSnapshot) ou supprimer mon compte (deleteMyAccount).
+- Entraide entre voisins : adresse e-mail du compte (lien de connexion), jeton de session. Stockage : Projet Supabase DÉDIÉ à l’entraide (authentification, distinct de la synchronisation) ; jeton dans le localStorage (clé sb-neighbors-auth-token). Destinataires : Supabase (sous-traitant : hébergement et authentification de l’entraide) ; Prestataire d’envoi d’e-mails choisi par l’éditeur (lien de connexion). Finalité : Se connecter à l’entraide sans mot de passe. Fonction facultative, réservée aux personnes de 15 ans et plus.. Base : votre consentement. Durée : Jusqu’à suppression du compte. L’adresse n’est jamais visible des autres membres.. Effacement : Entraide > Mon compte > Supprimer mon compte (deleteMyAccount : photos, puis compte et tout ce qui s’y rattache).
+- Entraide : pseudo et quartier (position arrondie à 0,01°, environ 1 km). Jamais d’adresse ni de position exacte. Stockage : Supabase de l’entraide, table profiles (protégée par RLS ; arrondi refait par la base). Destinataires : Supabase (sous-traitant) ; Autres membres de l’entraide à moins de ~55 km (pseudo et quartier, à travers vos annonces, réponses et conversations). Finalité : Afficher qui publie et à quelle distance approximative, pour s’entraider entre voisins. Base : votre consentement. Durée : Jusqu’à suppression du compte. Effacement : Supprimer mon compte ; le pseudo et le quartier se modifient dans Entraide > Mon profil (5 modifications par jour).
+- Entraide : annonces (type, titre, description, espèce), réponses publiques aux questions, photo d’annonce (redessinée, sans EXIF ni GPS, 1 Mo au plus). Stockage : Supabase de l’entraide (tables posts et replies ; photos dans un bucket privé neighbors-photos). Destinataires : Supabase (sous-traitant) ; Autres membres de l’entraide à moins de ~55 km, sauf personnes que vous avez bloquées. Finalité : Donner, échanger, prêter, poser des questions entre jardiniers voisins. Base : votre consentement. Durée : Annonces : 60 jours puis suppression automatique (photos comprises). Réponses : tant que l’annonce existe. Effacement : Entraide > Mes annonces > Supprimer (photo comprise) ; suppression du compte.
+- Entraide : messages privés entre deux membres. Stockage : Supabase de l’entraide (tables threads et messages ; RLS : seuls les deux participants les lisent). Destinataires : Supabase (sous-traitant) ; Votre correspondant ; L’éditeur, uniquement pour traiter un signalement visant ce message. Finalité : Se mettre d’accord pour un don, un échange ou un prêt. Base : votre consentement. Durée : Jusqu’à suppression du compte de l’un des deux participants (la conversation disparaît alors pour les deux). Effacement : Supprimer mon compte ; bloquer une personne masque la conversation des deux côtés.
+- Entraide : signalements envoyés (motif, précisions facultatives), personnes bloquées, compteurs d’usage par jour, journal de modération (identifiants et décision, sans le contenu). Stockage : Supabase de l’entraide (tables reports, blocks, quotas, moderation_log ; non lisibles par les autres membres). Destinataires : Supabase (sous-traitant) ; L’éditeur (modération). Finalité : Modérer les contenus (loi pour la confiance dans l’économie numérique), protéger les membres, limiter les abus. Base : intérêt légitime (sécurité, confort d’usage). Durée : Signalements et journal de modération : 12 mois. Blocages : jusqu’au déblocage ou à la suppression du compte. Compteurs : 7 jours. Effacement : Débloquer une personne ; suppression du compte (vos signalements et blocages disparaissent).
 - Préférences et repères : thème, date du dernier export, première utilisation, dernière notification, dernière synchronisation. Stockage : localStorage (clés permajardin:…). Aucun destinataire extérieur. Finalité : Confort d’usage (rappel de sauvegarde, une notification par jour au plus). Base : intérêt légitime (sécurité, confort d’usage). Durée : Jusqu’à effacement. Effacement : Effacer toutes mes données.
 - Adresse IP, date, URL et navigateur de chaque requête (journaux techniques d’hébergement). Stockage : Vercel. Destinataires : Vercel (hébergeur). Finalité : Sécurité et exploitation du site. Base : intérêt légitime (sécurité, confort d’usage). Durée : Selon l’offre Vercel du propriétaire (à vérifier dans le tableau de bord). Effacement : Demande à l’éditeur du site.
 
@@ -35,8 +41,9 @@ Aucune de ces données n’est vendue, ni utilisée pour de la publicité ou du 
 ## Bases légales
 
 - Exécution du service que vous demandez : carte, météo locale, calendrier d’entretien (RGPD, art. 6.1.b).
-- Votre consentement : envoi d’une photo à Pl@ntNet pour l’identification, et sauvegarde en ligne. Il est demandé avant le premier envoi et vous pouvez le retirer à tout moment dans Réglages > Vie privée (art. 6.1.a).
-- Intérêt légitime : journaux techniques de sécurité de l’hébergeur et préférences d’usage (art. 6.1.f).
+- Votre consentement : envoi d’une photo à Pl@ntNet pour l’identification, sauvegarde en ligne, et entraide entre voisins (compte, pseudo, quartier, annonces, messages). Il est demandé avant le premier envoi et vous pouvez le retirer à tout moment dans Réglages > Vie privée (art. 6.1.a).
+- Intérêt légitime : journaux techniques de sécurité de l’hébergeur, préférences d’usage, modération de l’entraide (signalements, blocages, limites d’usage contre les abus) (art. 6.1.f).
+- Obligation légale : conservation des données d’identification et traitement des signalements de contenus illicites, dans les limites prévues par la loi pour la confiance dans l’économie numérique (art. 6.1.c).
 
 Information sans blocage : pour afficher la carte et la météo, les coordonnées de votre jardin sont envoyées à l’IGN (Géoplateforme, API Carto) et à Open-Meteo, par l’intermédiaire de notre hébergeur. Ces envois ne contiennent ni votre nom ni votre e-mail.
 
@@ -47,6 +54,9 @@ Information sans blocage : pour afficher la carte et la météo, les coordonnée
 - Open-Meteo : prévisions et historique météo.
 - Pl@ntNet (Cirad, INRAE, Inria, IRD) : identification des plantes à partir des photos que vous envoyez.
 - Supabase : compte et sauvegarde en ligne, seulement si vous activez la synchronisation.
+- Supabase (projet distinct, dédié à l’entraide) : compte, profil, annonces, photos, messages, signalements, seulement si vous rejoignez l’entraide. Supabase est notre sous-traitant (RGPD, art. 28).
+- Prestataire d’envoi d’e-mails (à renseigner par l’éditeur) : envoi du lien de connexion de l’entraide.
+- Les autres membres de l’entraide : voir la section « Entraide entre voisins ».
 
 Chaque service applique sa propre politique de confidentialité.
 
@@ -54,7 +64,28 @@ Chaque service applique sa propre politique de confidentialité.
 
 Vercel est une société américaine : des données techniques (adresse IP, requêtes) peuvent être traitées aux États-Unis. Les garanties applicables (clauses contractuelles types ou cadre de protection des données UE-États-Unis) sont à confirmer par l’éditeur auprès de Vercel.
 
-Le lieu d’hébergement du projet Supabase et d’Open-Meteo est également à confirmer.
+Le lieu d’hébergement des projets Supabase (synchronisation et entraide) et d’Open-Meteo est également à confirmer : la région Union européenne doit être vérifiée dans le tableau de bord Supabase avant l’ouverture au public. Supabase est une société américaine : les mêmes garanties (clauses contractuelles types, accord de traitement des données) sont à confirmer.
+
+## Entraide entre voisins
+
+L’entraide est facultative. Elle permet de publier des annonces de don, d’échange, de prêt ou des questions, et d’écrire en privé à d’autres jardiniers proches. Elle est réservée aux personnes de 15 ans et plus.
+
+- Compte : votre adresse e-mail sert uniquement à vous envoyer un lien de connexion. Elle n’est visible d’aucun autre membre.
+- Profil public : un pseudo et un quartier. Le quartier est une position arrondie à environ 1 km, jamais votre adresse ni votre position exacte. Choisissez un pseudo qui ne révèle pas votre identité.
+- Annonces et réponses : titre, description, espèce et photo éventuelle. Elles sont visibles des membres situés à moins de 55 km environ, sauf ceux que vous avez bloqués. N’y écrivez ni votre adresse, ni votre téléphone, ni de données concernant d’autres personnes.
+- Photos : redessinées dans votre navigateur avant l’envoi (position GPS et métadonnées supprimées), 1 Mo au plus, stockées dans un espace privé. Une photo de jardin peut elle-même révéler un lieu : regardez l’arrière-plan.
+- Messages privés : lisibles seulement par vous et votre correspondant. L’éditeur ne les lit pas, sauf pour traiter un signalement visant l’un d’eux.
+- Signalements et blocages : un signalement est lu par l’éditeur ; il n’est pas communiqué à la personne signalée. Un blocage masque réciproquement annonces, réponses et conversations.
+
+Durées de conservation : les annonces (et leurs photos) sont supprimées 60 jours après leur publication. Le compte, le profil, les réponses et les messages sont conservés jusqu’à la suppression du compte, que vous pouvez faire à tout moment dans l’entraide : tout est alors effacé, y compris vos photos. Les signalements sont conservés 12 mois. Certaines données d’identification peuvent être conservées plus longtemps par l’hébergeur lorsque la loi l’impose (un an pour les données permettant d’identifier l’auteur d’un contenu).
+
+Aucune donnée de l’entraide n’est vendue, cédée à des fins publicitaires, ni utilisée pour du profilage. L’entraide n’utilise ni cookie ni traceur publicitaire ; seul un jeton de connexion est gardé dans le stockage de votre navigateur.
+
+Exercer vos droits : suppression du compte dans l’appli ; accès, rectification, portabilité, opposition ou limitation par e-mail à l’éditeur. Nous répondons dans un délai d’un mois. Vos annonces et réponses peuvent être exportées sur demande.
+
+## Âge minimum
+
+L’entraide est réservée aux personnes de 15 ans et plus, âge du consentement numérique en France (loi Informatique et Libertés, art. 45). En dessous, l’accord d’un parent est nécessaire et l’entraide n’est pas proposée. Si vous pensez qu’un mineur de moins de 15 ans a créé un compte, écrivez à l’éditeur : le compte sera supprimé.
 
 ## Cookies et traceurs
 
@@ -66,13 +97,14 @@ PermaJardin ne dépose aucun cookie et n’utilise ni mesure d’audience ni tra
 - Rectification : directement dans l’appli.
 - Effacement : Réglages > Vie privée > Effacer toutes mes données, avec suppression de la sauvegarde en ligne si vous êtes connecté.
 - Opposition, limitation et retrait du consentement : Réglages > Vie privée > Retirer mon consentement, ou par e-mail à l’éditeur.
+- Entraide : suppression définitive du compte, des annonces, des photos et des messages depuis l’entraide ; accès et portabilité des données de l’entraide par e-mail à l’éditeur.
 - Réclamation : auprès de la CNIL (www.cnil.fr).
 
 Pour toute demande : [à compléter]. Pour les données détenues par un prestataire (par exemple Pl@ntNet), vous pouvez aussi vous adresser à lui.
 
 ## Sécurité
 
-Connexions chiffrées (HTTPS), aucune clé secrète dans l’appli, accès à la sauvegarde en ligne limité à son propriétaire, validation de tout fichier importé.
+Connexions chiffrées (HTTPS), aucune clé secrète dans l’appli, accès à la sauvegarde en ligne limité à son propriétaire, validation de tout fichier importé. Entraide : base séparée de la sauvegarde, règles d’accès appliquées par la base elle-même (chaque membre ne lit que ce qui lui est destiné), quartier arrondi côté appli puis de nouveau côté base, photos privées sans métadonnées, limites quotidiennes contre les abus. En cas de violation de données à risque pour vous, l’éditeur prévient la CNIL et les personnes concernées dans les conditions prévues par le RGPD.
 
 ## Modifications
 
