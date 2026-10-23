@@ -7,7 +7,7 @@ import { DATA_INVENTORY, type LegalBasis } from './security/inventory'
 export const DRAFT_BANNER = 'BROUILLON À FAIRE VALIDER PAR UN PROFESSIONNEL'
 export const DRAFT_NOTE = 'Texte provisoire, à faire valider par un professionnel avant publication. Il ne constitue pas un avis juridique.'
 
-export const LEGAL_VERSION = '1.0'
+export const LEGAL_VERSION = '1.1'
 /** Dernière mise à jour (AAAA-MM-JJ). */
 export const LEGAL_UPDATED = '2026-10-23'
 
@@ -76,7 +76,8 @@ export const CONFIDENTIALITE: LegalDoc = {
         ul(
           'Vos jardins, plantes et photos restent sur votre appareil, dans votre navigateur.',
           'Pas de compte obligatoire, pas de publicité, pas de cookie, pas de traceur.',
-          'Quelques services extérieurs reçoivent une partie de vos données uniquement quand la fonction l’exige : carte, météo, identification d’une plante, sauvegarde en ligne facultative.',
+          'Quelques services extérieurs reçoivent une partie de vos données uniquement quand la fonction l’exige : carte, météo, identification d’une plante, sauvegarde en ligne facultative, entraide entre voisins facultative.',
+          'L’entraide entre voisins demande un compte (adresse e-mail) et un âge minimum de 15 ans. Elle ne reçoit ni votre adresse ni votre position exacte, seulement un quartier arrondi à environ 1 km.',
           'Vous pouvez tout exporter ou tout effacer à tout moment depuis les Réglages.',
         ),
       ],
@@ -97,8 +98,9 @@ export const CONFIDENTIALITE: LegalDoc = {
       blocs: [
         ul(
           'Exécution du service que vous demandez : carte, météo locale, calendrier d’entretien (RGPD, art. 6.1.b).',
-          'Votre consentement : envoi d’une photo à Pl@ntNet pour l’identification, et sauvegarde en ligne. Il est demandé avant le premier envoi et vous pouvez le retirer à tout moment dans Réglages > Vie privée (art. 6.1.a).',
-          'Intérêt légitime : journaux techniques de sécurité de l’hébergeur et préférences d’usage (art. 6.1.f).',
+          'Votre consentement : envoi d’une photo à Pl@ntNet pour l’identification, sauvegarde en ligne, et entraide entre voisins (compte, pseudo, quartier, annonces, messages). Il est demandé avant le premier envoi et vous pouvez le retirer à tout moment dans Réglages > Vie privée (art. 6.1.a).',
+          'Intérêt légitime : journaux techniques de sécurité de l’hébergeur, préférences d’usage, modération de l’entraide (signalements, blocages, limites d’usage contre les abus) (art. 6.1.f).',
+          'Obligation légale : conservation des données d’identification et traitement des signalements de contenus illicites, dans les limites prévues par la loi pour la confiance dans l’économie numérique (art. 6.1.c).',
         ),
         p('Information sans blocage : pour afficher la carte et la météo, les coordonnées de votre jardin sont envoyées à l’IGN (Géoplateforme, API Carto) et à Open-Meteo, par l’intermédiaire de notre hébergeur. Ces envois ne contiennent ni votre nom ni votre e-mail.'),
       ],
@@ -112,6 +114,9 @@ export const CONFIDENTIALITE: LegalDoc = {
           'Open-Meteo : prévisions et historique météo.',
           'Pl@ntNet (Cirad, INRAE, Inria, IRD) : identification des plantes à partir des photos que vous envoyez.',
           'Supabase : compte et sauvegarde en ligne, seulement si vous activez la synchronisation.',
+          'Supabase (projet distinct, dédié à l’entraide) : compte, profil, annonces, photos, messages, signalements, seulement si vous rejoignez l’entraide. Supabase est notre sous-traitant (RGPD, art. 28).',
+          'Prestataire d’envoi d’e-mails (à renseigner par l’éditeur) : envoi du lien de connexion de l’entraide.',
+          'Les autres membres de l’entraide : voir la section « Entraide entre voisins ».',
         ),
         p('Chaque service applique sa propre politique de confidentialité.'),
       ],
@@ -120,7 +125,30 @@ export const CONFIDENTIALITE: LegalDoc = {
       titre: 'Transferts hors Union européenne',
       blocs: [
         p('Vercel est une société américaine : des données techniques (adresse IP, requêtes) peuvent être traitées aux États-Unis. Les garanties applicables (clauses contractuelles types ou cadre de protection des données UE-États-Unis) sont à confirmer par l’éditeur auprès de Vercel.'),
-        p('Le lieu d’hébergement du projet Supabase et d’Open-Meteo est également à confirmer.'),
+        p('Le lieu d’hébergement des projets Supabase (synchronisation et entraide) et d’Open-Meteo est également à confirmer : la région Union européenne doit être vérifiée dans le tableau de bord Supabase avant l’ouverture au public. Supabase est une société américaine : les mêmes garanties (clauses contractuelles types, accord de traitement des données) sont à confirmer.'),
+      ],
+    },
+    {
+      titre: 'Entraide entre voisins',
+      blocs: [
+        p('L’entraide est facultative. Elle permet de publier des annonces de don, d’échange, de prêt ou des questions, et d’écrire en privé à d’autres jardiniers proches. Elle est réservée aux personnes de 15 ans et plus.'),
+        ul(
+          'Compte : votre adresse e-mail sert uniquement à vous envoyer un lien de connexion. Elle n’est visible d’aucun autre membre.',
+          'Profil public : un pseudo et un quartier. Le quartier est une position arrondie à environ 1 km, jamais votre adresse ni votre position exacte. Choisissez un pseudo qui ne révèle pas votre identité.',
+          'Annonces et réponses : titre, description, espèce et photo éventuelle. Elles sont visibles des membres situés à moins de 55 km environ, sauf ceux que vous avez bloqués. N’y écrivez ni votre adresse, ni votre téléphone, ni de données concernant d’autres personnes.',
+          'Photos : redessinées dans votre navigateur avant l’envoi (position GPS et métadonnées supprimées), 1 Mo au plus, stockées dans un espace privé. Une photo de jardin peut elle-même révéler un lieu : regardez l’arrière-plan.',
+          'Messages privés : lisibles seulement par vous et votre correspondant. L’éditeur ne les lit pas, sauf pour traiter un signalement visant l’un d’eux.',
+          'Signalements et blocages : un signalement est lu par l’éditeur ; il n’est pas communiqué à la personne signalée. Un blocage masque réciproquement annonces, réponses et conversations.',
+        ),
+        p('Durées de conservation : les annonces (et leurs photos) sont supprimées 60 jours après leur publication. Le compte, le profil, les réponses et les messages sont conservés jusqu’à la suppression du compte, que vous pouvez faire à tout moment dans l’entraide : tout est alors effacé, y compris vos photos. Les signalements sont conservés 12 mois. Certaines données d’identification peuvent être conservées plus longtemps par l’hébergeur lorsque la loi l’impose (un an pour les données permettant d’identifier l’auteur d’un contenu).'),
+        p('Aucune donnée de l’entraide n’est vendue, cédée à des fins publicitaires, ni utilisée pour du profilage. L’entraide n’utilise ni cookie ni traceur publicitaire ; seul un jeton de connexion est gardé dans le stockage de votre navigateur.'),
+        p('Exercer vos droits : suppression du compte dans l’appli ; accès, rectification, portabilité, opposition ou limitation par e-mail à l’éditeur. Nous répondons dans un délai d’un mois. Vos annonces et réponses peuvent être exportées sur demande.'),
+      ],
+    },
+    {
+      titre: 'Âge minimum',
+      blocs: [
+        p('L’entraide est réservée aux personnes de 15 ans et plus, âge du consentement numérique en France (loi Informatique et Libertés, art. 45). En dessous, l’accord d’un parent est nécessaire et l’entraide n’est pas proposée. Si vous pensez qu’un mineur de moins de 15 ans a créé un compte, écrivez à l’éditeur : le compte sera supprimé.'),
       ],
     },
     {
@@ -135,6 +163,7 @@ export const CONFIDENTIALITE: LegalDoc = {
           'Rectification : directement dans l’appli.',
           'Effacement : Réglages > Vie privée > Effacer toutes mes données, avec suppression de la sauvegarde en ligne si vous êtes connecté.',
           'Opposition, limitation et retrait du consentement : Réglages > Vie privée > Retirer mon consentement, ou par e-mail à l’éditeur.',
+          'Entraide : suppression définitive du compte, des annonces, des photos et des messages depuis l’entraide ; accès et portabilité des données de l’entraide par e-mail à l’éditeur.',
           'Réclamation : auprès de la CNIL (www.cnil.fr).',
         ),
         p(`Pour toute demande : ${CONTACT_EMAIL}. Pour les données détenues par un prestataire (par exemple Pl@ntNet), vous pouvez aussi vous adresser à lui.`),
@@ -142,7 +171,7 @@ export const CONFIDENTIALITE: LegalDoc = {
     },
     {
       titre: 'Sécurité',
-      blocs: [p('Connexions chiffrées (HTTPS), aucune clé secrète dans l’appli, accès à la sauvegarde en ligne limité à son propriétaire, validation de tout fichier importé.')],
+      blocs: [p('Connexions chiffrées (HTTPS), aucune clé secrète dans l’appli, accès à la sauvegarde en ligne limité à son propriétaire, validation de tout fichier importé. Entraide : base séparée de la sauvegarde, règles d’accès appliquées par la base elle-même (chaque membre ne lit que ce qui lui est destiné), quartier arrondi côté appli puis de nouveau côté base, photos privées sans métadonnées, limites quotidiennes contre les abus. En cas de violation de données à risque pour vous, l’éditeur prévient la CNIL et les personnes concernées dans les conditions prévues par le RGPD.')],
     },
     {
       titre: 'Modifications',
@@ -165,7 +194,19 @@ export const MENTIONS: LegalDoc = {
     { titre: 'Directeur de la publication', blocs: [p(DIRECTEUR_PUBLICATION)] },
     {
       titre: 'Hébergeur',
-      blocs: [p('Vercel Inc., 440 N Barranca Ave #4133, Covina, CA 91723, États-Unis. Site : vercel.com.')],
+      blocs: [
+        p('Site et application : Vercel Inc., 440 N Barranca Ave #4133, Covina, CA 91723, États-Unis. Site : vercel.com.'),
+        p(`Données de l’entraide entre voisins (comptes, annonces, photos, messages) : Supabase, projet dédié. Raison sociale, adresse et région d’hébergement : ${TO_COMPLETE} (à confirmer par l’éditeur dans le tableau de bord Supabase).`),
+      ],
+    },
+    {
+      titre: 'Contenus publiés par les membres',
+      blocs: [
+        p('Les annonces, réponses, photos et messages de l’entraide sont publiés par leurs auteurs, qui en sont seuls responsables. L’éditeur intervient comme hébergeur de ces contenus au sens de l’article 6 de la loi n° 2004-575 du 21 juin 2004 (LCEN) : il ne les contrôle pas avant publication et n’en est pas l’auteur.'),
+        p('Il retire promptement tout contenu manifestement illicite dès qu’il en a connaissance, ou dès qu’il lui est notifié.'),
+        p(`Pour signaler un contenu : bouton « Signaler » de l’appli, ou par e-mail à ${CONTACT_EMAIL} en indiquant la date, la description du contenu et son adresse (identifiant de l’annonce), le motif et votre identité. Un signalement abusif engage la responsabilité de son auteur.`),
+        p('Point de contact pour les autorités et les utilisateurs (règlement (UE) 2022/2065, dit DSA) : voir l’adresse de contact ci-dessus. Les langues acceptées sont le français et l’anglais.'),
+      ],
     },
     {
       titre: 'Sources de données et licences',
@@ -200,7 +241,7 @@ export const CGU: LegalDoc = {
     },
     {
       titre: 'Gratuité et absence de compte',
-      blocs: [p('Le service est gratuit et s’utilise sans compte. Un compte n’est nécessaire que pour la synchronisation facultative entre appareils.')],
+      blocs: [p('Le service est gratuit et s’utilise sans compte. Un compte n’est nécessaire que pour la synchronisation facultative entre appareils et pour l’entraide entre voisins.')],
     },
     {
       titre: 'Conseils indicatifs',
@@ -214,6 +255,66 @@ export const CGU: LegalDoc = {
       blocs: [
         p('L’identification par photo est fournie par Pl@ntNet et peut être fausse. Aucune garantie n’est donnée sur son exactitude.'),
         p('Ne consommez jamais une plante, un fruit ou un champignon sur la seule foi de l’application : certaines plantes sont toxiques.'),
+      ],
+    },
+    {
+      titre: 'Entraide entre voisins : accès',
+      blocs: [
+        ul(
+          'Réservée aux personnes de 15 ans et plus. Un compte par personne, avec une adresse e-mail qui vous appartient.',
+          'Pseudo libre, mais il ne doit ni usurper une autre personne, ni révéler votre identité contre votre gré, ni être trompeur ou offensant.',
+          'Le quartier que vous indiquez est le vôtre. Il est arrondi à environ 1 km.',
+          'L’entraide est gratuite et non commerciale : dons, échanges, prêts et questions entre particuliers.',
+        ),
+      ],
+    },
+    {
+      titre: 'Règles de conduite',
+      blocs: [
+        p('Il est interdit de publier :'),
+        ul(
+          'des contenus illicites, haineux, discriminatoires, violents, sexuellement explicites, ou portant atteinte à la vie privée, à l’image ou aux droits d’autrui ;',
+          'du harcèlement, des menaces, de l’usurpation d’identité ;',
+          'de la publicité, du démarchage, des ventes ou des services payants : l’entraide est gratuite ;',
+          'des produits ou conseils dangereux : produits phytosanitaires interdits ou non autorisés, plantes, graines ou champignons toxiques présentés comme comestibles, plantes protégées ou espèces exotiques envahissantes interdites ;',
+          'votre adresse exacte, des numéros de téléphone, ou des informations personnelles sur d’autres personnes ;',
+          'des contenus dont vous n’avez pas les droits (photos d’autrui, textes copiés).',
+        ),
+        p('Il est interdit de perturber le service : création de faux comptes, envoi en masse, collecte automatisée des annonces ou des pseudos, tentative de contourner les limites quotidiennes, les blocages ou la modération.'),
+      ],
+    },
+    {
+      titre: 'Contenus publiés et licence',
+      blocs: [
+        p('Vous restez propriétaire de vos contenus. En les publiant, vous accordez à l’éditeur, gratuitement et pour la durée de leur publication, le droit de les héberger et de les afficher aux autres membres de l’entraide, uniquement pour faire fonctionner le service.'),
+        p('Vous garantissez avoir le droit de les publier et en êtes seul responsable. Les annonces sont supprimées au bout de 60 jours ; vous pouvez les supprimer avant, ainsi que votre compte, à tout moment.'),
+      ],
+    },
+    {
+      titre: 'Signalement, blocage et modération',
+      blocs: [
+        ul(
+          'Chaque membre peut signaler une annonce, une réponse, un profil ou un message qu’il reçoit, avec un motif.',
+          'Trois signalements de membres distincts masquent automatiquement une annonce ou une réponse, en attendant l’examen de l’éditeur. Le masquage n’est pas une sanction.',
+          'Chaque membre peut bloquer une personne : plus aucune annonce, réponse ni message n’est visible dans un sens comme dans l’autre.',
+          'L’éditeur examine les signalements, peut retirer un contenu, avertir ou bannir un compte, notamment en cas de manquement aux règles de conduite. Il indique à la personne concernée le motif de la décision, sauf si la loi ou une enquête l’interdit.',
+          'Pour contester une décision, écrivez à l’éditeur : le dossier est réexaminé.',
+        ),
+        p('L’éditeur n’est pas tenu de surveiller les contenus. Il ne peut pas garantir qu’un contenu illicite soit retiré avant d’avoir été signalé.'),
+      ],
+    },
+    {
+      titre: 'Hébergeur et responsabilité',
+      blocs: [
+        p('L’éditeur est hébergeur des contenus de l’entraide (loi n° 2004-575 du 21 juin 2004, art. 6) : sa responsabilité n’est engagée que s’il a connaissance d’un contenu manifestement illicite et ne le retire pas promptement.'),
+        p('Les dons, échanges et prêts se font entre particuliers, sous leur seule responsabilité : l’éditeur n’est partie à aucun accord, ne garantit ni la qualité, ni la sécurité, ni l’identification d’une plante, ni la fiabilité d’une personne. Rencontrez-vous dans un lieu public, ne communiquez pas votre adresse à la légère, lavez et inspectez ce que vous recevez. Un prêt de matériel est un contrat entre vous.'),
+        p('Vous restez responsable du respect de la réglementation sur les plantes et les semences que vous donnez ou échangez.'),
+      ],
+    },
+    {
+      titre: 'Suspension et suppression du compte',
+      blocs: [
+        p('Vous pouvez supprimer votre compte à tout moment depuis l’entraide : profil, annonces, réponses, photos et messages sont effacés définitivement. L’éditeur peut suspendre ou supprimer un compte qui enfreint ces conditions, sans préavis en cas de manquement grave. Un compte suspendu ne peut plus ni publier, ni lire les annonces.'),
       ],
     },
     {

@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 // Faux navigateur minimal : pile d'historique + événements popstate.
 type FakeStorage = { getItem(k: string): string | null; setItem(k: string, v: string): void }
@@ -69,6 +69,29 @@ describe('parseHash', () => {
     expect(ui.parseHash('#access_token=abc&type=magiclink')).toBeUndefined()
     expect(ui.parseHash('#nimporte')).toBeUndefined()
     expect(ui.parseHash('')).toBeUndefined()
+  })
+})
+
+describe('onglet Voisins (entraide)', () => {
+  afterEach(() => vi.unstubAllEnvs())
+  it('absent sans variables : hash ignoré, entrée du menu non proposée', async () => {
+    vi.stubEnv('VITE_NEIGHBORS_SUPABASE_URL', '')
+    vi.stubEnv('VITE_NEIGHBORS_SUPABASE_ANON_KEY', '')
+    const { ui } = await load('#voisins')
+    expect(ui.tabAvailable('voisins')).toBe(false)
+    expect(ui.parseHash('#voisins')).toBeUndefined()
+    expect(ui.parseHash('#entraide')).toBeUndefined()
+    expect(ui.getUi().tab).toBe('carte')
+  })
+  it('présent quand configuré : #voisins et le retour #entraide ouvrent l’onglet, dans « Plus »', async () => {
+    vi.stubEnv('VITE_NEIGHBORS_SUPABASE_URL', 'https://x.supabase.co')
+    vi.stubEnv('VITE_NEIGHBORS_SUPABASE_ANON_KEY', 'cle')
+    const { ui } = await load('#entraide')
+    expect(ui.parseHash('#voisins')).toBe('voisins')
+    expect(ui.parseHash('#entraide')).toBe('voisins')
+    expect(ui.getUi().tab).toBe('voisins')
+    expect(ui.ALWAYS_TABS).toContain('voisins')
+    for (const m of ui.MODES) expect(ui.tabInMode(m, 'voisins')).toBe(true)
   })
 })
 

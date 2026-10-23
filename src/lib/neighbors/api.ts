@@ -45,12 +45,16 @@ interface RawError {
   name?: string
 }
 
+const REPORT_TARGETS: readonly ReportTarget[] = ['post', 'reply', 'profile', 'message']
+
 const QUOTA_TEXT: Record<string, string> = {
   post: `Limite atteinte : ${L.postsPerDay} annonces par jour. Revenez demain.`,
   reply: `Limite atteinte : ${L.repliesPerDay} réponses par jour. Revenez demain.`,
   message: `Limite atteinte : ${L.messagesPerDay} messages par jour. Revenez demain.`,
   report: `Limite atteinte : ${L.reportsPerDay} signalements par jour. Revenez demain.`,
   thread: 'Limite atteinte : 10 nouvelles conversations par jour. Revenez demain.',
+  profile: 'Limite atteinte : 5 modifications du profil par jour. Revenez demain.',
+  post_open: `Limite atteinte : ${L.openPostsMax} annonces ouvertes en même temps. Fermez-en une avant d’en publier une autre.`,
   block: 'Limite atteinte : trop de blocages aujourd’hui. Revenez demain.',
 }
 
@@ -75,6 +79,7 @@ export function translateError(e: unknown): string {
   if (low.includes('jwt') || low.includes('refresh token') || low.includes('not authenticated') || err.code === 'PGRST301' || err.status === 401) {
     return 'Session expirée. Reconnectez-vous avec un nouveau lien.'
   }
+  if (low.includes('forbidden') && err.code === '42501') return 'Action non autorisée.'
   if (err.code === '42501' || low.includes('row-level security') || low.includes('permission denied')) {
     return 'Action non autorisée. Vérifiez que vous êtes connecté et que votre profil existe.'
   }
@@ -84,7 +89,8 @@ export function translateError(e: unknown): string {
   if (low.includes('failed to fetch') || low.includes('networkerror') || low.includes('load failed')) return 'Connexion impossible. Vérifiez votre accès à Internet.'
   // Messages déjà en français (http.ts : délai dépassé, connexion impossible) ou erreurs locales.
   if (e instanceof NeighborsError) return e.message
-  if (/[éèàçêô]|Réessayez|Vérifiez|impossible/.test(msg)) return msg
+  // Messages français produits par src/lib/http.ts (jamais un message brut du serveur).
+  if (e instanceof Error && /^(Le service met trop de temps à répondre|Connexion impossible)\./.test(msg)) return msg
   return 'Une erreur est survenue. Réessayez dans un instant.'
 }
 
@@ -113,17 +119,30 @@ async function run<T>(q: PromiseLike<{ data: T | null; error: unknown }>): Promi
 
 // ---------- Validation (avant envoi) ----------
 
-const CONTROL = /[\u0000-\u001f\u007f<>]/
+const CONTROL = /[\u0000-\u001f\u007f-\u009f<>]/
+/** Caractères invisibles ou de direction : usurpation visuelle d'un pseudo (même liste que la contrainte SQL). */
+const INVISIBLE = /[\u00ad\u034f\u061c\u115f\u1160\u17b4\u17b5\u180e\u200b-\u200f\u2028-\u202e\u2060-\u206f\u3164\ufeff\uffa0]/
+/** Dans les textes libres : on retire contrôles (sauf retour à la ligne) et marques de direction (inversion d'affichage). */
+const TEXT_STRIP = /[\u0000-\u0008\u000b-\u001f\u007f-\u009f\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]/g
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+/** Identifiant envoyé au serveur : un UUID, en minuscules. Refuse tout le reste avant la requête. */
+export function assertUuid(raw: string, label = 'Identifiant'): string {
+  if (typeof raw !== 'string' || !UUID.test(raw)) throw new NeighborsError(`${label} invalide.`, 'invalid')
+  return raw.toLowerCase()
+}
 
 export function validatePseudo(raw: string): string {
   const p = raw.trim()
   if (p.length < L.pseudoMin || p.length > L.pseudoMax) throw new NeighborsError(`Le pseudo doit faire entre ${L.pseudoMin} et ${L.pseudoMax} caractères.`, 'invalid')
   if (CONTROL.test(p)) throw new NeighborsError('Le pseudo contient des caractères interdits (< > ou caractères de contrôle).', 'invalid')
+  if (INVISIBLE.test(p)) throw new NeighborsError('Le pseudo contient des caractères invisibles ou de direction.', 'invalid')
+  if (!/[\p{L}\p{N}]/u.test(p)) throw new NeighborsError('Le pseudo doit contenir au moins une lettre ou un chiffre.', 'invalid')
   return p
 }
 
 function validateText(raw: string, label: string, max: number, required: boolean): string {
-  const t = raw.replace(/\r\n/g, '\n').trim()
+  const t = raw.replace(/\r\n/g, '\n').replace(TEXT_STRIP, '').trim()
   if (required && !t) throw new NeighborsError(`${label} : ce champ est obligatoire.`, 'invalid')
   if (t.length > max) throw new NeighborsError(`${label} : ${max} caractères au maximum (${t.length} saisis).`, 'invalid')
   return t
@@ -216,7 +235,11 @@ export async function getSession(): Promise<NeighborsSession | null> {
 export function onSessionChange(cb: (s: NeighborsSession | null) => void): () => void {
   const client = neighborsClient()
   if (!client) return () => {}
-  const { data } = client.auth.onAuthStateChange((_evt, session) => cb(session?.user ? { userId: session.user.id, email: session.user.email ?? null } : null))
+  const { data } = client.auth.onAuthStateChange((_evt, session) => {
+    const user = session?.user
+    if (!user) profileCache = undefined
+    cb(user ? { userId: user.id, email: user.email ?? null } : null)
+  })
   return () => data.subscription.unsubscribe()
 }
 
@@ -339,7 +362,9 @@ export async function listPosts(opts: ListPostsOptions = {}): Promise<Post[]> {
   const uid = await requireUserId()
   const center = await myCell()
   if (!center) throw new NeighborsError('Créez d’abord votre profil (pseudo et quartier).', 'no_profile')
-  const radius = Math.min(L.maxRadiusKm, Math.max(1, opts.radiusKm ?? L.defaultRadiusKm))
+  const asked = Number.isFinite(opts.radiusKm) ? (opts.radiusKm as number) : L.defaultRadiusKm
+  const radius = Math.min(L.maxRadiusKm, Math.max(1, asked))
+  if (opts.kind !== undefined && !POST_KINDS.includes(opts.kind)) throw new NeighborsError('Type d’annonce inconnu.', 'invalid')
   const b = cellBounds(center, radius)
   let q = sb()
     .from('posts')
@@ -376,7 +401,16 @@ async function preparePhoto(photo: Blob): Promise<Blob> {
   return clean
 }
 
-const newId = () => (globalThis.crypto?.randomUUID?.() ?? `${Date.now().toString(16)}-${Math.random().toString(16).slice(2)}`)
+/** UUID v4 aléatoire (le chemin de stockage doit avoir ce format, la politique Storage l'impose). Jamais Math.random. */
+function newId(): string {
+  const c = globalThis.crypto
+  if (!c?.getRandomValues) throw new NeighborsError('Ce navigateur ne permet pas d’envoyer une photo en toute sécurité.', 'invalid')
+  const b = c.getRandomValues(new Uint8Array(16))
+  b[6] = (b[6] & 0x0f) | 0x40
+  b[8] = (b[8] & 0x3f) | 0x80
+  const h = Array.from(b, (x) => x.toString(16).padStart(2, '0')).join('')
+  return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`
+}
 
 /** Publie une annonce. Valide, vérifie le quota du jour, nettoie la photo, l'envoie, puis crée l'annonce. */
 export async function createPost(input: NewPost): Promise<Post> {
@@ -419,33 +453,42 @@ export const PHOTO_BUCKET = 'neighbors-photos'
 async function removePhotos(paths: string[]): Promise<void> {
   if (!paths.length) return
   try {
-    await sb().storage.from(PHOTO_BUCKET).remove(paths)
+    await sb().storage.from(PHOTO_BUCKET).remove(paths) // {error} ignoré : au mieux, l'éditeur purge les orphelins (docs/ENTRAIDE.md)
   } catch {
-    /* au mieux : l'éditeur purge les fichiers orphelins (docs/ENTRAIDE.md) */
+    /* hors ligne : idem */
   }
 }
 
-/** URL temporaire (1 h) d'une photo d'annonce, ou null. */
+/**
+ * Photo d'annonce sous forme d'URL `blob:` (ou null). Le fichier est téléchargé avec la session (bucket privé) :
+ * pas de lien signé qui circule, et la CSP `img-src 'self' data: blob:` n'a pas à être élargie.
+ * L'interface doit appeler `URL.revokeObjectURL(url)` quand l'image n'est plus affichée.
+ */
 export async function getPhotoUrl(path: string | null): Promise<string | null> {
-  if (!path) return null
+  if (!path || path.length > 200 || path.includes('..') || !/^[0-9a-f-]{36}\/[0-9a-f-]{36}\.jpg$/i.test(path)) return null
   try {
-    const { data } = await sb().storage.from(PHOTO_BUCKET).createSignedUrl(path, 3600)
-    return data?.signedUrl ?? null
+    const { data, error } = await sb().storage.from(PHOTO_BUCKET).download(path)
+    if (error || !data || !/^image\/(jpeg|png|webp)$/.test(data.type) || data.size > L.photoMaxBytes) return null
+    return URL.createObjectURL(data)
   } catch {
     return null
   }
 }
 
-async function setStatus(id: string, status: 'open' | 'closed'): Promise<void> {
+async function setStatus(rawId: string, status: 'open' | 'closed'): Promise<void> {
+  const id = assertUuid(rawId, 'Annonce')
   const uid = await requireUserId()
-  await run(sb().from('posts').update({ status }).eq('id', id).eq('author', uid) as never)
+  const rows = await run<{ id: string }[]>(sb().from('posts').update({ status }).eq('id', id).eq('author', uid).select('id') as never)
+  // Une annonce masquée par la modération (ou supprimée) n'est plus modifiable : la base ne touche aucune ligne, sans erreur.
+  if (!rows || rows.length === 0) throw new NeighborsError('Cette annonce ne peut plus être modifiée (masquée ou supprimée).', 'not_found')
 }
 
 /** Marque l'annonce comme terminée (donnée, échangée, résolue…). */
 export const closePost = (id: string) => setStatus(id, 'closed')
 export const reopenPost = (id: string) => setStatus(id, 'open')
 
-export async function deletePost(id: string): Promise<void> {
+export async function deletePost(rawId: string): Promise<void> {
+  const id = assertUuid(rawId, 'Annonce')
   const uid = await requireUserId()
   const client = sb()
   const row = await run<{ photo_path: string | null }>(client.from('posts').select('photo_path').eq('id', id).eq('author', uid).maybeSingle() as never)
@@ -474,13 +517,15 @@ const toReply = (r: ReplyRow, uid: string): Reply => ({
   createdAt: r.created_at,
 })
 
-export async function listReplies(postId: string): Promise<Reply[]> {
+export async function listReplies(rawPostId: string): Promise<Reply[]> {
+  const postId = assertUuid(rawPostId, 'Annonce')
   const uid = await requireUserId()
   const rows = (await run<ReplyRow[]>(sb().from('replies').select('*, profiles(pseudo)').eq('post_id', postId).order('created_at', { ascending: true }).limit(200) as never)) ?? []
   return rows.map((r) => toReply(r, uid))
 }
 
-export async function addReply(postId: string, body: string): Promise<Reply> {
+export async function addReply(rawPostId: string, body: string): Promise<Reply> {
+  const postId = assertUuid(rawPostId, 'Annonce')
   const uid = await requireUserId()
   const text = validateText(body, 'Réponse', L.bodyMax, true)
   const row = await run<ReplyRow>(sb().from('replies').insert({ post_id: postId, author: uid, body: text }).select('*, profiles(pseudo)').single() as never)
@@ -488,7 +533,8 @@ export async function addReply(postId: string, body: string): Promise<Reply> {
   return toReply(row, uid)
 }
 
-export async function deleteReply(id: string): Promise<void> {
+export async function deleteReply(rawId: string): Promise<void> {
+  const id = assertUuid(rawId, 'Réponse')
   await requireUserId()
   await run(sb().from('replies').delete().eq('id', id) as never)
 }
@@ -524,13 +570,15 @@ export async function listThreads(): Promise<Thread[]> {
 }
 
 /** Ouvre (ou retrouve) la conversation avec une personne. L'ordre des identifiants est imposé par la base (user_a < user_b). */
-export async function openThread(otherId: string, postId?: string | null): Promise<Thread> {
-  const uid = await requireUserId()
+export async function openThread(rawOtherId: string, rawPostId?: string | null): Promise<Thread> {
+  const otherId = assertUuid(rawOtherId, 'Personne')
+  const postId = rawPostId ? assertUuid(rawPostId, 'Annonce') : null
+  const uid = (await requireUserId()).toLowerCase()
   if (otherId === uid) throw new NeighborsError('Vous ne pouvez pas vous écrire à vous-même.', 'invalid')
   const [a, b] = uid < otherId ? [uid, otherId] : [otherId, uid]
   const client = sb()
   let row = await run<ThreadRow>(client.from('threads').select('*').eq('user_a', a).eq('user_b', b).maybeSingle() as never)
-  if (!row) row = await run<ThreadRow>(client.from('threads').insert({ user_a: a, user_b: b, post_id: postId ?? null }).select('*').single() as never)
+  if (!row) row = await run<ThreadRow>(client.from('threads').insert({ user_a: a, user_b: b, post_id: postId }).select('*').single() as never)
   if (!row) throw new NeighborsError('La conversation n’a pas pu être ouverte.')
   return toThread(row, uid, await pseudos([otherId]))
 }
@@ -544,13 +592,15 @@ interface MessageRow {
 }
 const toMessage = (r: MessageRow, uid: string): Message => ({ id: r.id, threadId: r.thread_id, mine: r.sender === uid, body: r.body, createdAt: r.created_at })
 
-export async function listMessages(threadId: string): Promise<Message[]> {
+export async function listMessages(rawThreadId: string): Promise<Message[]> {
+  const threadId = assertUuid(rawThreadId, 'Conversation')
   const uid = await requireUserId()
   const rows = (await run<MessageRow[]>(sb().from('messages').select('*').eq('thread_id', threadId).order('created_at', { ascending: true }).limit(500) as never)) ?? []
   return rows.map((r) => toMessage(r, uid))
 }
 
-export async function sendMessage(threadId: string, body: string): Promise<Message> {
+export async function sendMessage(rawThreadId: string, body: string): Promise<Message> {
+  const threadId = assertUuid(rawThreadId, 'Conversation')
   const uid = await requireUserId()
   const text = validateMessage(body)
   const row = await run<MessageRow>(sb().from('messages').insert({ thread_id: threadId, sender: uid, body: text }).select('*').single() as never)
@@ -561,21 +611,25 @@ export async function sendMessage(threadId: string, body: string): Promise<Messa
 // ---------- Modération ----------
 
 /** Signale un contenu. À 3 signalements de personnes distinctes, une annonce ou une réponse est masquée automatiquement. */
-export async function report(target: ReportTarget, targetId: string, reason: ReportReason, details?: string): Promise<void> {
+export async function report(target: ReportTarget, rawTargetId: string, reason: ReportReason, details?: string): Promise<void> {
+  const targetId = assertUuid(rawTargetId, 'Contenu')
   const uid = await requireUserId()
-  if (!(reason in REPORT_REASONS)) throw new NeighborsError('Motif de signalement inconnu.', 'invalid')
+  if (!REPORT_TARGETS.includes(target)) throw new NeighborsError('Type de contenu inconnu.', 'invalid')
+  if (!Object.hasOwn(REPORT_REASONS, reason)) throw new NeighborsError('Motif de signalement inconnu.', 'invalid')
   const d = validateText(details ?? '', 'Précisions', L.detailsMax, false)
   await run(sb().from('reports').insert({ reporter: uid, target_kind: target, target_id: targetId, reason, details: d || null }) as never)
 }
 
 /** Bloque une personne : plus aucune annonce, réponse ni message dans les deux sens. */
-export async function blockUser(userId: string): Promise<void> {
-  const uid = await requireUserId()
+export async function blockUser(rawUserId: string): Promise<void> {
+  const userId = assertUuid(rawUserId, 'Personne')
+  const uid = (await requireUserId()).toLowerCase()
   if (userId === uid) throw new NeighborsError('Vous ne pouvez pas vous bloquer vous-même.', 'invalid')
   await run(sb().from('blocks').insert({ blocker: uid, blocked: userId }) as never)
 }
 
-export async function unblockUser(userId: string): Promise<void> {
+export async function unblockUser(rawUserId: string): Promise<void> {
+  const userId = assertUuid(rawUserId, 'Personne')
   const uid = await requireUserId()
   await run(sb().from('blocks').delete().eq('blocker', uid).eq('blocked', userId) as never)
 }
@@ -596,12 +650,27 @@ export async function deleteMyAccount(): Promise<void> {
   const uid = await requireUserId()
   const client = sb()
   // Les fichiers doivent partir par l'API Storage (effacer les lignes SQL laisserait les fichiers).
-  try {
-    const { data } = await client.storage.from(PHOTO_BUCKET).list(uid, { limit: 1000 })
-    const paths = (data ?? []).map((f) => `${uid}/${f.name}`)
-    if (paths.length) await client.storage.from(PHOTO_BUCKET).remove(paths)
-  } catch (e) {
+  // Toute erreur (liste ou suppression) arrête l'opération : on ne supprime jamais le compte en laissant des photos.
+  const photoError = (e: unknown): never => {
     throw new NeighborsError(`Vos photos n’ont pas pu être supprimées, le compte est conservé. ${translateError(e)}`)
+  }
+  try {
+    let empty = false
+    for (let round = 0; round < 20 && !empty; round++) {
+      const { data, error } = await client.storage.from(PHOTO_BUCKET).list(uid, { limit: 100 })
+      if (error) photoError(error)
+      const paths = (data ?? []).map((f) => `${uid}/${f.name}`)
+      if (!paths.length) {
+        empty = true
+        break
+      }
+      const { error: rmError } = await client.storage.from(PHOTO_BUCKET).remove(paths)
+      if (rmError) photoError(rmError)
+    }
+    if (!empty) photoError(new Error('fichiers restants'))
+  } catch (e) {
+    if (e instanceof NeighborsError) throw e
+    photoError(e)
   }
   await run(client.rpc('delete_my_account') as never)
   profileCache = undefined

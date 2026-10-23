@@ -21,8 +21,8 @@ export function useOnline(): boolean {
 }
 
 export interface Loaded<T> {
-  data: T | undefined
-  error: string | undefined
+  data?: T
+  error?: string
   loading: boolean
   /** Recharge avec indicateur de chargement. */
   reload: () => void

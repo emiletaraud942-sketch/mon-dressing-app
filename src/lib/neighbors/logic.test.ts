@@ -1,0 +1,111 @@
+import { describe, expect, it } from 'vitest'
+import {
+  CONDUCT_RULES,
+  DEFAULT_RADIUS,
+  KIND_FILTERS,
+  RADII,
+  cellPreview,
+  daysLeft,
+  describeCell,
+  formatWhen,
+  isEmailLike,
+  kindOption,
+  parseRadius,
+  postStatusInfo,
+  sameIds,
+  shouldPoll,
+} from './logic'
+import { POST_KINDS } from './types'
+
+const NOW = new Date('2026-10-23T12:00:00Z')
+
+describe('filtres', () => {
+  it('Tout / Dons / Échanges / Prêts / Questions, dans cet ordre', () => {
+    expect(KIND_FILTERS.map((f) => f.label)).toEqual(['Tout', 'Dons', 'Échanges', 'Prêts', 'Questions'])
+    expect(kindOption('all')).toBeUndefined()
+    for (const k of POST_KINDS) expect(kindOption(k)).toBe(k)
+  })
+  it('rayon : 5, 10 ou 25 km, sinon 10', () => {
+    expect([...RADII]).toEqual([5, 10, 25])
+    expect(parseRadius('25')).toBe(25)
+    expect(parseRadius(5)).toBe(5)
+    expect(parseRadius('7')).toBe(DEFAULT_RADIUS)
+    expect(parseRadius(null)).toBe(10)
+    expect(parseRadius('abc')).toBe(10)
+  })
+})
+
+describe('règles de conduite', () => {
+  it('couvrent respect, pas de vente, pas de données personnelles', () => {
+    const t = CONDUCT_RULES.join(' ')
+    expect(t).toMatch(/Respect/)
+    expect(t).toMatch(/vend/)
+    expect(t).toMatch(/donnée personnelle/)
+  })
+})
+
+describe('dates', () => {
+  const ago = (ms: number) => new Date(NOW.getTime() - ms).toISOString()
+  it('formate le temps écoulé en français', () => {
+    expect(formatWhen(ago(10_000), NOW)).toBe('à l’instant')
+    expect(formatWhen(ago(5 * 60_000), NOW)).toBe('il y a 5 min')
+    expect(formatWhen(ago(3 * 3_600_000), NOW)).toBe('il y a 3 h')
+    expect(formatWhen(ago(30 * 3_600_000), NOW)).toBe('hier')
+    expect(formatWhen(ago(4 * 86_400_000), NOW)).toBe('il y a 4 j')
+    expect(formatWhen(ago(60 * 86_400_000), NOW)).toMatch(/\d/)
+    expect(formatWhen('pas une date', NOW)).toBe('')
+  })
+  it('jours restants', () => {
+    expect(daysLeft(new Date(NOW.getTime() + 2.2 * 86_400_000).toISOString(), NOW)).toBe(3)
+    expect(daysLeft(ago(1000), NOW)).toBe(0)
+    expect(daysLeft('x', NOW)).toBe(0)
+  })
+})
+
+describe('statut d’une annonce', () => {
+  const future = new Date(NOW.getTime() + 10 * 86_400_000).toISOString()
+  const past = new Date(NOW.getTime() - 86_400_000).toISOString()
+  it('ouverte : peut être close', () => {
+    const s = postStatusInfo({ status: 'open', expiresAt: future }, NOW)
+    expect(s).toMatchObject({ canClose: true, canReopen: false, tone: 'green' })
+    expect(s.label).toContain('10 j')
+  })
+  it('terminée : peut être rouverte', () => {
+    expect(postStatusInfo({ status: 'closed', expiresAt: future }, NOW)).toMatchObject({ canClose: false, canReopen: true })
+  })
+  it('masquée ou expirée : ni close ni rouverte', () => {
+    expect(postStatusInfo({ status: 'hidden', expiresAt: future }, NOW)).toMatchObject({ canClose: false, canReopen: false, tone: 'danger' })
+    expect(postStatusInfo({ status: 'open', expiresAt: past }, NOW)).toMatchObject({ label: 'Expirée', canClose: false, canReopen: false })
+  })
+})
+
+describe('quartier', () => {
+  it('arrondit le centre du jardin à 0,01° avant tout affichage', () => {
+    const p = cellPreview(47.2234567, 2.0678901)
+    expect(p.cell).toEqual({ lat: 47.22, lon: 2.07 })
+    expect(p.text).toBe('47.22° N, 2.07° E')
+    expect(p.text).not.toContain('4567')
+  })
+  it('hémisphères Sud et Ouest', () => {
+    expect(describeCell({ lat: -33.87, lon: -70.5 })).toBe('33.87° S, 70.50° O')
+  })
+})
+
+describe('divers', () => {
+  it('ne rafraîchit que visible et en ligne', () => {
+    expect(shouldPoll('visible', true)).toBe(true)
+    expect(shouldPoll('hidden', true)).toBe(false)
+    expect(shouldPoll('visible', false)).toBe(false)
+    expect(shouldPoll(undefined, undefined)).toBe(true)
+  })
+  it('sameIds évite les rendus inutiles', () => {
+    expect(sameIds([{ id: 'a' }, { id: 'b' }], [{ id: 'a' }, { id: 'b' }])).toBe(true)
+    expect(sameIds([{ id: 'a' }], [{ id: 'a' }, { id: 'b' }])).toBe(false)
+    expect(sameIds([{ id: 'a' }, { id: 'b' }], [{ id: 'b' }, { id: 'a' }])).toBe(false)
+  })
+  it('e-mail : contrôle de forme', () => {
+    expect(isEmailLike(' a@b.fr ')).toBe(true)
+    expect(isEmailLike('a@b')).toBe(false)
+    expect(isEmailLike('a b@c.fr')).toBe(false)
+  })
+})

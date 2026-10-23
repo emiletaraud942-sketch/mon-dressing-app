@@ -10,20 +10,13 @@
 -- Profil public : un pseudo et le quartier. Rien d'autre (pas d'e-mail, pas d'adresse).
 create table if not exists public.profiles (
   user_id    uuid primary key references auth.users (id) on delete cascade,
-  pseudo     text not null
-             constraint profiles_pseudo_check check (
-               char_length(pseudo) between 3 and 24 and pseudo = btrim(pseudo)
-               and pseudo !~ '[[:cntrl:]<>]'
-               -- caractères invisibles ou de direction (usurpation d'identité visuelle) ; au moins une lettre ou un chiffre
-               and pseudo !~ '[\u00ad\u034f\u061c\u115f\u1160\u17b4\u17b5\u180e\u200b-\u200f\u2028-\u202e\u2060-\u206f\u3164\ufeff\uffa0]'
-               and pseudo ~ '[[:alnum:]]'
-             ),
+  pseudo     text not null,                    -- contrainte profiles_pseudo_check ajoutée plus bas (rejouable)
   cell_lat   numeric(6, 2) not null check (cell_lat between -90 and 90),
   cell_lon   numeric(7, 2) not null check (cell_lon between -180 and 180),
   banned_at  timestamptz,                      -- posé par l'éditeur seulement (aucun droit client sur cette colonne)
   created_at timestamptz not null default now()
 );
--- Mise à niveau d'une base créée avec l'ancienne contrainte de pseudo.
+-- Pseudo : 3 à 24 caractères, ni invisibles ni de direction (usurpation visuelle), au moins une lettre ou un chiffre.
 alter table public.profiles drop constraint if exists profiles_pseudo_check;
 alter table public.profiles add constraint profiles_pseudo_check check (
   char_length(pseudo) between 3 and 24 and pseudo = btrim(pseudo)
@@ -156,6 +149,44 @@ as $$
   );
 $$;
 
+-- Lecture limitée à ~55 km autour de son propre quartier (rayon maximal de l'appli : 50 km).
+-- Empêche un seul compte d'aspirer toutes les annonces, donc tous les pseudos et quartiers, du pays.
+create or replace function public.neighbors_can_see_cell(lat numeric, lon numeric)
+returns boolean
+language sql stable security definer
+set search_path = ''
+as $$
+  select exists (
+    select 1 from public.profiles p
+    where p.user_id = (select auth.uid()) and p.banned_at is null
+      and abs(p.cell_lat - lat) <= 0.5 and abs(p.cell_lon - lon) <= 1.5
+  );
+$$;
+
+-- Nombre de fichiers de l'appelant dans le bucket. Fonction séparée : une politique de storage.objects qui lirait
+-- storage.objects directement provoquerait « infinite recursion detected in policy » (constaté sur Postgres 16).
+create or replace function public.neighbors_my_photo_count()
+returns integer
+language sql stable security definer
+set search_path = ''
+as $$
+  select count(*)::integer from storage.objects o
+  where o.bucket_id = 'neighbors-photos' and (storage.foldername(o.name))[1] = (select auth.uid())::text;
+$$;
+
+-- Garde commune : un client ne peut pas agir au nom d'un autre (et ne consomme jamais le quota d'un autre).
+create or replace function public.neighbors_assert_self(who uuid)
+returns void
+language plpgsql stable
+set search_path = ''
+as $$
+begin
+  if (select auth.uid()) is not null and who is distinct from (select auth.uid()) then
+    raise exception 'forbidden' using errcode = '42501';
+  end if;
+end;
+$$;
+
 -- Prend une unité de quota du jour ; échoue au-delà du plafond. Atomique (un seul upsert).
 create or replace function public.neighbors_take_quota(uid uuid, act text, max_per_day integer)
 returns void
@@ -194,6 +225,40 @@ drop trigger if exists neighbors_profile_round on public.profiles;
 create trigger neighbors_profile_round before insert or update on public.profiles
   for each row execute function public.neighbors_profile_round();
 
+-- Profil : changer de pseudo ou de quartier est limité à 5 fois par jour (anti-usurpation, anti-balayage de la carte).
+create or replace function public.neighbors_profile_before_update()
+returns trigger language plpgsql security definer
+set search_path = ''
+as $$
+begin
+  if new.pseudo is distinct from old.pseudo or new.cell_lat is distinct from old.cell_lat or new.cell_lon is distinct from old.cell_lon then
+    perform public.neighbors_assert_self(new.user_id);
+    perform public.neighbors_take_quota(new.user_id, 'profile', 5);
+  end if;
+  return new;
+end;
+$$;
+drop trigger if exists neighbors_profile_before_update on public.profiles;
+create trigger neighbors_profile_before_update before update on public.profiles
+  for each row execute function public.neighbors_profile_before_update();
+
+-- Bannissement : tout ce que la personne a publié est masqué aussitôt (plus d'étape manuelle oubliée).
+create or replace function public.neighbors_profile_after_ban()
+returns trigger language plpgsql security definer
+set search_path = ''
+as $$
+begin
+  if new.banned_at is not null and old.banned_at is null then
+    update public.posts   set status = 'hidden' where author = new.user_id and status <> 'hidden';
+    update public.replies set status = 'hidden' where author = new.user_id and status <> 'hidden';
+  end if;
+  return new;
+end;
+$$;
+drop trigger if exists neighbors_profile_after_ban on public.profiles;
+create trigger neighbors_profile_after_ban after update of banned_at on public.profiles
+  for each row execute function public.neighbors_profile_after_ban();
+
 -- Annonce : cellule recopiée du profil, expiration à +60 jours, statut « open », quota.
 create or replace function public.neighbors_post_before_insert()
 returns trigger language plpgsql security definer
@@ -202,6 +267,7 @@ as $$
 declare
   p record;
 begin
+  perform public.neighbors_assert_self(new.author);
   select cell_lat, cell_lon, banned_at into p from public.profiles where user_id = new.author;
   if not found or p.banned_at is not null then
     raise exception 'not_member' using errcode = 'P0001';
@@ -211,6 +277,10 @@ begin
   new.status := 'open';
   new.created_at := now();
   new.expires_at := now() + interval '60 days';
+  -- Plafond d'annonces ouvertes en même temps (volume de données).
+  if (select count(*) from public.posts where author = new.author and status = 'open' and expires_at > now()) >= 30 then
+    raise exception 'quota_exceeded:post_open' using errcode = 'P0001';
+  end if;
   perform public.neighbors_take_quota(new.author, 'post', 5);
   return new;
 end;
@@ -228,6 +298,7 @@ declare
   k text;
   s text;
 begin
+  perform public.neighbors_assert_self(new.author);
   select kind, status into k, s from public.posts where id = new.post_id;
   if k is distinct from 'question' or s is distinct from 'open' then
     raise exception 'reply_not_allowed' using errcode = 'P0001';
@@ -264,6 +335,7 @@ returns trigger language plpgsql security definer
 set search_path = ''
 as $$
 begin
+  perform public.neighbors_assert_self(new.sender);
   new.created_at := now();
   perform public.neighbors_take_quota(new.sender, 'message', 200);
   return new;
@@ -292,6 +364,7 @@ returns trigger language plpgsql security definer
 set search_path = ''
 as $$
 begin
+  perform public.neighbors_assert_self(new.blocker);
   select pseudo into new.blocked_pseudo from public.profiles where user_id = new.blocked;
   new.created_at := now();
   perform public.neighbors_take_quota(new.blocker, 'block', 50);
@@ -310,6 +383,7 @@ as $$
 declare
   target_owner uuid;
 begin
+  perform public.neighbors_assert_self(new.reporter);
   if new.target_kind = 'post' then
     select author into target_owner from public.posts where id = new.target_id;
   elsif new.target_kind = 'reply' then
@@ -345,8 +419,11 @@ as $$
 declare
   n integer;
 begin
-  select count(distinct reporter) into n
-  from public.reports where target_kind = new.target_kind and target_id = new.target_id;
+  -- Seuls comptent les signalements de comptes de plus de 24 h et non bannis (freine les faux comptes jetables).
+  select count(distinct r.reporter) into n
+  from public.reports r join public.profiles p on p.user_id = r.reporter
+  where r.target_kind = new.target_kind and r.target_id = new.target_id
+    and p.banned_at is null and p.created_at < now() - interval '24 hours';
   if n >= 3 then
     if new.target_kind = 'post' then
       update public.posts set status = 'hidden' where id = new.target_id and status <> 'hidden';
@@ -363,6 +440,9 @@ create trigger neighbors_report_after_insert after insert on public.reports
 
 -- Les fonctions de déclencheur ne sont pas appelables par l'API.
 revoke all on function public.neighbors_profile_round() from public, anon, authenticated;
+revoke all on function public.neighbors_profile_before_update() from public, anon, authenticated;
+revoke all on function public.neighbors_profile_after_ban() from public, anon, authenticated;
+revoke all on function public.neighbors_assert_self(uuid) from public, anon, authenticated;
 revoke all on function public.neighbors_post_before_insert() from public, anon, authenticated;
 revoke all on function public.neighbors_reply_before_insert() from public, anon, authenticated;
 revoke all on function public.neighbors_thread_before_insert() from public, anon, authenticated;
@@ -375,6 +455,10 @@ revoke all on function public.neighbors_take_quota(uuid, text, integer) from pub
 -- Les aides de politiques sont appelées par les politiques RLS, donc exécutables par les connectés.
 revoke all on function public.neighbors_is_member() from public, anon;
 revoke all on function public.neighbors_is_blocked(uuid) from public, anon;
+revoke all on function public.neighbors_can_see_cell(numeric, numeric) from public, anon;
+grant execute on function public.neighbors_can_see_cell(numeric, numeric) to authenticated;
+revoke all on function public.neighbors_my_photo_count() from public, anon;
+grant execute on function public.neighbors_my_photo_count() to authenticated;
 grant execute on function public.neighbors_is_member() to authenticated;
 grant execute on function public.neighbors_is_blocked(uuid) to authenticated;
 
@@ -449,7 +533,7 @@ create policy posts_select on public.posts for select to authenticated using (
   author = (select auth.uid())
   or (
     status = 'open' and expires_at > now()
-    and (select public.neighbors_is_member())
+    and public.neighbors_can_see_cell(cell_lat, cell_lon)   -- membre non banni, dans ~55 km
     and not public.neighbors_is_blocked(author)
   )
 );
@@ -498,6 +582,7 @@ create policy threads_insert on public.threads for insert to authenticated with 
   (select auth.uid()) in (user_a, user_b)
   and (select public.neighbors_is_member())
   and not public.neighbors_is_blocked(case when user_a = (select auth.uid()) then user_b else user_a end)
+  and (post_id is null or exists (select 1 from public.posts p where p.id = threads.post_id))   -- annonce visible de l'appelant
 );
 
 -- messages : lisibles des seuls participants ; envoi par un participant, en son nom.
@@ -517,7 +602,15 @@ drop policy if exists reports_select on public.reports;
 create policy reports_select on public.reports for select to authenticated using (reporter = (select auth.uid()));
 drop policy if exists reports_insert on public.reports;
 create policy reports_insert on public.reports for insert to authenticated
-  with check (reporter = (select auth.uid()) and (select public.neighbors_is_member()));
+  with check (
+    reporter = (select auth.uid()) and (select public.neighbors_is_member())
+    -- On ne signale que ce que l'on peut voir (sous-requêtes soumises à la RLS de l'appelant).
+    and case reports.target_kind
+      when 'post'  then exists (select 1 from public.posts p where p.id = reports.target_id)
+      when 'reply' then exists (select 1 from public.replies r where r.id = reports.target_id)
+      else true
+    end
+  );
 
 -- blocks : les siens seulement.
 drop policy if exists blocks_select on public.blocks;
@@ -536,20 +629,33 @@ values ('neighbors-photos', 'neighbors-photos', false, 1048576, array['image/jpe
 on conflict (id) do update
   set public = false, file_size_limit = 1048576, allowed_mime_types = array['image/jpeg', 'image/png', 'image/webp'];
 
--- Lecture : tout membre connecté. Écriture et suppression : uniquement dans son propre dossier « <user_id>/ ».
+-- Lecture : ses propres photos, ou la photo d'une annonce que l'on peut voir (la RLS de posts s'applique : blocages,
+-- masquage, expiration, zone). Un membre ne peut donc ni lister les dossiers des autres ni deviner un chemin.
 drop policy if exists neighbors_photos_select on storage.objects;
 create policy neighbors_photos_select on storage.objects for select to authenticated
-  using (bucket_id = 'neighbors-photos' and (select public.neighbors_is_member()));
+  using (
+    bucket_id = 'neighbors-photos'
+    and (select public.neighbors_is_member())
+    and (
+      (storage.foldername(name))[1] = (select auth.uid())::text
+      or exists (select 1 from public.posts p where p.photo_path = objects.name)
+    )
+  );
+-- Écriture : uniquement « <user_id>/<uuid>.jpg », au plus 20 fichiers par personne (volume de stockage).
 drop policy if exists neighbors_photos_insert on storage.objects;
 create policy neighbors_photos_insert on storage.objects for insert to authenticated
   with check (
     bucket_id = 'neighbors-photos'
     and (storage.foldername(name))[1] = (select auth.uid())::text
+    and array_length(storage.foldername(name), 1) = 1
+    and name ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.jpg$'
     and (select public.neighbors_is_member())
+    and (select public.neighbors_my_photo_count()) < 20
   );
 drop policy if exists neighbors_photos_delete on storage.objects;
 create policy neighbors_photos_delete on storage.objects for delete to authenticated
   using (bucket_id = 'neighbors-photos' and (storage.foldername(name))[1] = (select auth.uid())::text);
+-- Aucune politique update : pas d'écrasement (upsert) d'un fichier existant.
 
 -- ============================================================
 -- 8. Suppression de compte et nettoyage
@@ -575,22 +681,36 @@ $$;
 revoke all on function public.delete_my_account() from public, anon;
 grant execute on function public.delete_my_account() to authenticated;
 
--- Purge des annonces expirées depuis plus de 7 jours (à lancer par l'éditeur ou pg_cron ; aucun droit client).
+-- Purge quotidienne (éditeur ou pg_cron ; aucun droit client) : annonces expirées, vieux compteurs, signalements de
+-- plus de 12 mois. Renvoie les chemins de photos des annonces supprimées : à effacer ensuite par l'API Storage
+-- (un DELETE SQL sur storage.objects laisserait les fichiers ; voir docs/ENTRAIDE.md).
+drop function if exists public.neighbors_purge_expired();
 create or replace function public.neighbors_purge_expired()
-returns integer
+returns setof text
 language plpgsql security definer
 set search_path = ''
 as $$
-declare
-  n integer;
 begin
-  delete from public.posts where expires_at < now() - interval '7 days';
-  get diagnostics n = row_count;
   delete from public.quotas where day < (now() at time zone 'utc')::date - 7;
-  return n;
+  delete from public.reports where created_at < now() - interval '12 months';
+  return query delete from public.posts where expires_at < now() returning photo_path;
 end;
 $$;
 revoke all on function public.neighbors_purge_expired() from public, anon, authenticated;
+
+-- Fichiers à effacer : photos qu'aucune annonce ne référence (annonce supprimée ou expirée, compte supprimé, envoi sans
+-- publication) depuis plus d'un jour. À effacer par l'API Storage.
+create or replace function public.neighbors_orphan_photos()
+returns setof text
+language sql stable security definer
+set search_path = ''
+as $$
+  select o.name from storage.objects o
+  where o.bucket_id = 'neighbors-photos'
+    and o.created_at < now() - interval '1 day'
+    and not exists (select 1 from public.posts p where p.photo_path = o.name);
+$$;
+revoke all on function public.neighbors_orphan_photos() from public, anon, authenticated;
 
 comment on table public.profiles is 'Profil public d''entraide : pseudo et quartier (cellule de 0,01°). Donnée personnelle, effaçable via delete_my_account().';
 comment on table public.posts is 'Annonces d''entraide. Cellule recopiée du profil par déclencheur ; expire après 60 jours.';

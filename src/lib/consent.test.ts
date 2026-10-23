@@ -18,6 +18,16 @@ beforeEach(() => resetConsentMemory())
 afterEach(() => vi.unstubAllGlobals())
 
 describe('consentements', () => {
+  it('« voisins » est un accord à part, sans effet sur les autres', () => {
+    vi.stubGlobal('localStorage', memoryStorage())
+    expect(hasConsent('voisins')).toBe(false)
+    grantConsent('voisins')
+    expect(hasConsent('voisins')).toBe(true)
+    expect(hasConsent('plantnet')).toBe(false)
+    revokeConsent('voisins')
+    expect(hasConsent('voisins')).toBe(false)
+  })
+
   it('première demande : rien n’est accordé', () => {
     vi.stubGlobal('localStorage', memoryStorage())
     expect(hasConsent('plantnet')).toBe(false)

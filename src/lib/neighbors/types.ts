@@ -23,6 +23,7 @@ export const NEIGHBORS_LIMITS = {
   speciesIdMax: 128,
   photoMaxBytes: 1024 * 1024,
   postsPerDay: 5,
+  openPostsMax: 30,
   repliesPerDay: 30,
   messagesPerDay: 200,
   reportsPerDay: 20,

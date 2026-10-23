@@ -9,13 +9,15 @@ interface Call {
 const state = vi.hoisted(() => ({
   calls: [] as Call[],
   results: new Map<string, { data: unknown; error: unknown; count?: number }>(),
-  session: { user: { id: 'u-me', email: 'moi@example.org' } } as { user: { id: string; email: string } } | null,
+  session: { user: { id: '11111111-1111-4111-8111-111111111111', email: 'moi@example.org' } } as { user: { id: string; email: string } } | null,
   signInWithOtp: vi.fn(async (_a: unknown) => ({ error: null as unknown })),
   exchange: vi.fn(async (_c: string) => ({ error: null as unknown })),
   rpc: vi.fn(async (_n: string) => ({ data: null, error: null as unknown })),
   upload: vi.fn(async (_p: string, _b: unknown, _o: unknown) => ({ data: {}, error: null as unknown })),
   remove: vi.fn(async (_p: string[]) => ({ data: [], error: null })),
-  list: vi.fn(async (_d: string, _o: unknown) => ({ data: [{ name: 'a.jpg' }, { name: 'b.jpg' }], error: null })),
+  // Premier appel : deux fichiers ; ensuite le dossier est vide (comme après une suppression réussie).
+  list: vi.fn(async (_d: string, _o: unknown): Promise<{ data: { name: string }[]; error: unknown }> => ({ data: [], error: null })),
+  download: vi.fn(async (_p: string): Promise<{ data: Blob | null; error: unknown }> => ({ data: null, error: null })),
 }))
 
 function builder(table: string) {
@@ -49,7 +51,7 @@ vi.mock('./client', () => ({
       signOut: async () => ({ error: null }),
       onAuthStateChange: () => ({ data: { subscription: { unsubscribe() {} } } }),
     },
-    storage: { from: () => ({ upload: state.upload, remove: state.remove, list: state.list, createSignedUrl: async () => ({ data: { signedUrl: 'https://x/s' } }) }) },
+    storage: { from: () => ({ upload: state.upload, remove: state.remove, list: state.list, download: state.download }) },
   }),
 }))
 
@@ -58,9 +60,9 @@ vi.mock('../photos', () => ({ compressToTarget: vi.fn(async (b: Blob) => b) }))
 import { compressToTarget } from '../photos'
 import * as api from './api'
 
-const ME = { user_id: 'u-me', pseudo: 'Jardinier', cell_lat: 48.86, cell_lon: 2.35, created_at: '2026-10-01T00:00:00Z' }
+const ME = { user_id: '11111111-1111-4111-8111-111111111111', pseudo: 'Jardinier', cell_lat: 48.86, cell_lon: 2.35, created_at: '2026-10-01T00:00:00Z' }
 const postRow = (o: Record<string, unknown> = {}) => ({
-  id: 'p1', author: 'u-other', kind: 'don', title: 'Boutures', body: '', species_id: null, photo_path: null, status: 'open',
+  id: 'aaaaaaa1-0000-4000-8000-000000000001', author: '22222222-2222-4222-8222-222222222222', kind: 'don', title: 'Boutures', body: '', species_id: null, photo_path: null, status: 'open',
   cell_lat: 48.87, cell_lon: 2.35, created_at: '2026-10-02T00:00:00Z', expires_at: '2026-12-01T00:00:00Z', profiles: { pseudo: 'Voisine' }, ...o,
 })
 const set = (key: string, data: unknown, error: unknown = null, count?: number) => state.results.set(key, { data, error, count })
@@ -69,8 +71,10 @@ const opsOf = (table: string) => state.calls.filter((c) => c.table === table).fl
 beforeEach(async () => {
   state.calls.length = 0
   state.results.clear()
-  state.session = { user: { id: 'u-me', email: 'moi@example.org' } }
+  state.session = { user: { id: '11111111-1111-4111-8111-111111111111', email: 'moi@example.org' } }
   vi.clearAllMocks()
+  state.list.mockReset()
+  state.list.mockResolvedValueOnce({ data: [{ name: 'a.jpg' }, { name: 'b.jpg' }], error: null }).mockResolvedValue({ data: [], error: null })
   await api.signOut() // vide le cache de profil
   set('profiles:select', ME)
 })
@@ -159,7 +163,7 @@ describe('profil', () => {
     set('profiles:insert', ME)
     await api.saveProfile({ pseudo: 'Jardinier', lat: 48.856614, lon: 2.352222 })
     const ins = state.calls.find((c) => c.table === 'profiles' && c.ops.some(([m]) => m === 'insert'))!
-    expect(ins.ops.find(([m]) => m === 'insert')![1][0]).toEqual({ user_id: 'u-me', pseudo: 'Jardinier', cell_lat: 48.86, cell_lon: 2.35 })
+    expect(ins.ops.find(([m]) => m === 'insert')![1][0]).toEqual({ user_id: '11111111-1111-4111-8111-111111111111', pseudo: 'Jardinier', cell_lat: 48.86, cell_lon: 2.35 })
   })
   it('saveProfile refuse une position invalide', async () => {
     await expect(api.saveProfile({ pseudo: 'Jardinier', lat: 200, lon: 0 })).rejects.toThrow(/Position invalide/)
@@ -173,9 +177,9 @@ describe('profil', () => {
 
 describe('annonces', () => {
   it('listPosts calcule la distance et filtre par type et zone', async () => {
-    set('posts:select', [postRow(), postRow({ id: 'p2', cell_lat: 49.5, cell_lon: 2.35 })])
+    set('posts:select', [postRow(), postRow({ id: 'aaaaaaa2-0000-4000-8000-000000000002', cell_lat: 49.5, cell_lon: 2.35 })])
     const posts = await api.listPosts({ kind: 'don', radiusKm: 10 })
-    expect(posts.map((p) => p.id)).toEqual(['p1']) // p2 est à ~70 km
+    expect(posts.map((p) => p.id)).toEqual(['aaaaaaa1-0000-4000-8000-000000000001']) // p2 est à ~70 km
     expect(posts[0]).toMatchObject({ authorPseudo: 'Voisine', mine: false, distanceLabel: 'dans votre quartier' })
     const ops = opsOf('posts')
     expect(ops).toContainEqual(['eq', ['kind', 'don']])
@@ -187,11 +191,11 @@ describe('annonces', () => {
   })
   it('createPost envoie le minimum : ni cellule, ni date, ni statut', async () => {
     set('posts:select', null, null, 0)
-    set('posts:insert', postRow({ author: 'u-me' }))
+    set('posts:insert', postRow({ author: '11111111-1111-4111-8111-111111111111' }))
     await api.createPost({ kind: 'don', title: ' Boutures ', body: 'bien enracinées' })
     const payload = opsOf('posts').find(([m]) => m === 'insert')![1][0] as Record<string, unknown>
     expect(Object.keys(payload).sort()).toEqual(['author', 'body', 'kind', 'photo_path', 'species_id', 'title'])
-    expect(payload).toMatchObject({ author: 'u-me', title: 'Boutures' })
+    expect(payload).toMatchObject({ author: '11111111-1111-4111-8111-111111111111', title: 'Boutures' })
   })
   it('createPost valide avant tout envoi', async () => {
     await expect(api.createPost({ kind: 'don', title: '' })).rejects.toThrow(/obligatoire/)
@@ -204,12 +208,12 @@ describe('annonces', () => {
   })
   it('createPost passe la photo par la fonction de nettoyage puis l’envoie dans le dossier de l’utilisateur', async () => {
     set('posts:select', null, null, 0)
-    set('posts:insert', postRow({ author: 'u-me' }))
+    set('posts:insert', postRow({ author: '11111111-1111-4111-8111-111111111111' }))
     const photo = new Blob([new Uint8Array([0xff, 0xd8, 0xff, 0xd9])], { type: 'image/jpeg' })
     await api.createPost({ kind: 'pret', title: 'Sécateur', photo })
     expect(compressToTarget).toHaveBeenCalledWith(photo, expect.objectContaining({ targetBytes: expect.any(Number) }))
     const path = state.upload.mock.calls[0][0] as string
-    expect(path).toMatch(/^u-me\/.+\.jpg$/)
+    expect(path).toMatch(/^11111111-1111-4111-8111-111111111111\/[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.jpg$/)
     expect(state.upload.mock.calls[0][2]).toMatchObject({ contentType: 'image/jpeg', upsert: false })
   })
   it('createPost refuse une photo qui garde des métadonnées EXIF', async () => {
@@ -231,62 +235,163 @@ describe('annonces', () => {
     expect(state.remove).toHaveBeenCalledTimes(1)
   })
   it('closePost / deletePost ne ciblent que mes annonces', async () => {
-    await api.closePost('p9')
+    set('posts:update', [{ id: 'aaaaaaa9-0000-4000-8000-000000000009' }])
+    await api.closePost('aaaaaaa9-0000-4000-8000-000000000009')
     expect(opsOf('posts')).toContainEqual(['update', [{ status: 'closed' }]])
-    expect(opsOf('posts')).toContainEqual(['eq', ['author', 'u-me']])
+    expect(opsOf('posts')).toContainEqual(['eq', ['author', '11111111-1111-4111-8111-111111111111']])
     state.calls.length = 0
-    set('posts:select', { photo_path: 'u-me/x.jpg' })
-    await api.deletePost('p9')
-    expect(state.remove).toHaveBeenCalledWith(['u-me/x.jpg'])
+    set('posts:select', { photo_path: '11111111-1111-4111-8111-111111111111/x.jpg' })
+    await api.deletePost('aaaaaaa9-0000-4000-8000-000000000009')
+    expect(state.remove).toHaveBeenCalledWith(['11111111-1111-4111-8111-111111111111/x.jpg'])
+  })
+})
+
+describe('défauts corrigés (audit)', () => {
+  it('closePost signale une annonce masquée au lieu de réussir en silence', async () => {
+    set('posts:update', [])
+    await expect(api.closePost('aaaaaaa9-0000-4000-8000-000000000009')).rejects.toThrow(/ne peut plus être modifiée/)
+    await expect(api.reopenPost('aaaaaaa9-0000-4000-8000-000000000009')).rejects.toThrow(/ne peut plus/)
+  })
+  it('tout identifiant envoyé au serveur doit être un UUID (aucune requête sinon)', async () => {
+    const bad = 'x,id.neq.0)&select=*'
+    await expect(api.closePost(bad)).rejects.toThrow(/invalide/)
+    await expect(api.deletePost(bad)).rejects.toThrow(/invalide/)
+    await expect(api.listReplies(bad)).rejects.toThrow(/invalide/)
+    await expect(api.addReply(bad, 'x')).rejects.toThrow(/invalide/)
+    await expect(api.deleteReply(bad)).rejects.toThrow(/invalide/)
+    await expect(api.openThread(bad)).rejects.toThrow(/invalide/)
+    await expect(api.listMessages(bad)).rejects.toThrow(/invalide/)
+    await expect(api.sendMessage(bad, 'x')).rejects.toThrow(/invalide/)
+    await expect(api.report('post', bad, 'spam')).rejects.toThrow(/invalide/)
+    await expect(api.blockUser(bad)).rejects.toThrow(/invalide/)
+    await expect(api.unblockUser(bad)).rejects.toThrow(/invalide/)
+    expect(state.calls.filter((c) => c.table !== 'profiles')).toHaveLength(0)
+  })
+  it('assertUuid met en minuscules (l’ordre user_a < user_b de la base suppose des minuscules)', () => {
+    expect(api.assertUuid('AAAAAAA1-0000-4000-8000-000000000001')).toBe('aaaaaaa1-0000-4000-8000-000000000001')
+    expect(() => api.assertUuid('')).toThrow()
+    expect(() => api.assertUuid(undefined as never)).toThrow()
+  })
+  it('report refuse les noms hérités de Object (« constructor ») et les cibles inconnues', async () => {
+    await expect(api.report('post', 'aaaaaaa1-0000-4000-8000-000000000001', 'constructor' as never)).rejects.toThrow(/Motif/)
+    await expect(api.report('compte' as never, 'aaaaaaa1-0000-4000-8000-000000000001', 'spam')).rejects.toThrow(/inconnu/)
+  })
+  it('pseudo : caractères invisibles ou de direction refusés', () => {
+    expect(() => api.validatePseudo('Bo\u202Eb')).toThrow(/invisibles/)
+    expect(() => api.validatePseudo('\u3164\u3164\u3164')).toThrow(/invisibles/)
+    expect(() => api.validatePseudo('\u200bAlice')).toThrow(/invisibles/)
+    expect(() => api.validatePseudo('...')).toThrow(/lettre ou un chiffre/)
+    expect(() => api.validatePseudo('a\u0085b')).toThrow(/interdits/)
+    expect(api.validatePseudo('Zoé 🌱')).toBe('Zoé 🌱')
+  })
+  it('textes : marques de direction et contrôles retirés, emojis (ZWJ) conservés', () => {
+    expect(api.validateMessage('a\u202Eb\u2066c\u0000d')).toBe('abcd')
+    expect(api.validateMessage('👩\u200d🌾')).toBe('👩\u200d🌾')
+    expect(api.validateMessage('ligne1\r\nligne2')).toBe('ligne1\nligne2')
+  })
+  it('translateError ne renvoie jamais un message brut du serveur, même accentué', () => {
+    expect(api.translateError({ message: 'détail interne : table posts, colonne secrète é' })).toBe('Une erreur est survenue. Réessayez dans un instant.')
+  })
+  it('translateError : quotas de profil et d’annonces ouvertes, usurpation', () => {
+    expect(api.translateError({ message: 'quota_exceeded:profile' })).toContain('profil')
+    expect(api.translateError({ message: 'quota_exceeded:post_open' })).toContain('ouvertes')
+    expect(api.translateError({ message: 'forbidden', code: '42501' })).toContain('non autorisée')
+  })
+  it('listPosts : un rayon NaN retombe sur le rayon par défaut', async () => {
+    set('posts:select', [])
+    await api.listPosts({ radiusKm: Number.NaN })
+    const ops = opsOf('posts')
+    for (const [m, args] of ops) if (m === 'gte' || m === 'lte') expect(Number.isFinite(args[1])).toBe(true)
+  })
+  it('listPosts refuse un type inconnu', async () => {
+    await expect(api.listPosts({ kind: 'vente' as never })).rejects.toThrow(/inconnu/)
+  })
+  it('getPhotoUrl : télécharge avec la session (pas de lien signé) et rend une URL blob', async () => {
+    const createObjectURL = vi.fn(() => 'blob:x')
+    vi.stubGlobal('URL', Object.assign(URL, { createObjectURL }))
+    state.download.mockResolvedValueOnce({ data: new Blob([new Uint8Array([1, 2])], { type: 'image/jpeg' }), error: null })
+    const path = '11111111-1111-4111-8111-111111111111/aaaaaaa1-0000-4000-8000-000000000001.jpg'
+    expect(await api.getPhotoUrl(path)).toBe('blob:x')
+    expect(state.download).toHaveBeenCalledWith(path)
+    vi.unstubAllGlobals()
+  })
+  it('getPhotoUrl refuse un chemin hors modèle, un type non image et une erreur', async () => {
+    expect(await api.getPhotoUrl('../autre/x.jpg')).toBeNull()
+    expect(await api.getPhotoUrl('11111111-1111-4111-8111-111111111111/../x.jpg')).toBeNull()
+    expect(await api.getPhotoUrl(null)).toBeNull()
+    expect(state.download).not.toHaveBeenCalled()
+    const path = '11111111-1111-4111-8111-111111111111/aaaaaaa1-0000-4000-8000-000000000001.jpg'
+    state.download.mockResolvedValueOnce({ data: new Blob(['<svg onload=alert(1)>'], { type: 'image/svg+xml' }), error: null })
+    expect(await api.getPhotoUrl(path)).toBeNull()
+    state.download.mockResolvedValueOnce({ data: null, error: { message: 'x' } })
+    expect(await api.getPhotoUrl(path)).toBeNull()
+  })
+  it('deleteMyAccount : une erreur de liste (sans exception) arrête tout, le compte est conservé', async () => {
+    state.list.mockReset()
+    state.list.mockResolvedValue({ data: null as never, error: { message: 'boom' } })
+    await expect(api.deleteMyAccount()).rejects.toThrow(/conservé/)
+    expect(state.rpc).not.toHaveBeenCalled()
+  })
+  it('deleteMyAccount : une erreur de suppression arrête tout', async () => {
+    state.remove.mockResolvedValueOnce({ data: [], error: { message: 'denied' } } as never)
+    await expect(api.deleteMyAccount()).rejects.toThrow(/conservé/)
+    expect(state.rpc).not.toHaveBeenCalled()
+  })
+  it('deleteMyAccount : des fichiers qui ne partent pas ne bouclent pas à l’infini', async () => {
+    state.list.mockReset()
+    state.list.mockResolvedValue({ data: [{ name: 'a.jpg' }], error: null })
+    await expect(api.deleteMyAccount()).rejects.toThrow(/conservé/)
+    expect(state.list.mock.calls.length).toBeLessThanOrEqual(20)
+    expect(state.rpc).not.toHaveBeenCalled()
   })
 })
 
 describe('réponses et messages', () => {
   it('addReply valide et publie', async () => {
-    set('replies:insert', { id: 'r1', post_id: 'p1', author: 'u-me', body: 'Oui', created_at: 't', profiles: { pseudo: 'Jardinier' } })
-    const r = await api.addReply('p1', ' Oui ')
+    set('replies:insert', { id: 'ccccccc1-0000-4000-8000-000000000001', post_id: 'aaaaaaa1-0000-4000-8000-000000000001', author: '11111111-1111-4111-8111-111111111111', body: 'Oui', created_at: 't', profiles: { pseudo: 'Jardinier' } })
+    const r = await api.addReply('aaaaaaa1-0000-4000-8000-000000000001', ' Oui ')
     expect(r).toMatchObject({ mine: true, body: 'Oui' })
-    await expect(api.addReply('p1', '   ')).rejects.toThrow(/obligatoire/)
+    await expect(api.addReply('aaaaaaa1-0000-4000-8000-000000000001', '   ')).rejects.toThrow(/obligatoire/)
   })
   it('openThread ordonne les identifiants (user_a < user_b)', async () => {
     set('threads:select', null)
-    set('threads:insert', { id: 't1', user_a: 'u-me', user_b: 'u-zed', post_id: null, last_message_at: 't' })
-    set('profiles:select', [{ user_id: 'u-zed', pseudo: 'Zed' }])
-    const t = await api.openThread('u-zed')
+    set('threads:insert', { id: 'bbbbbbb1-0000-4000-8000-000000000001', user_a: '11111111-1111-4111-8111-111111111111', user_b: 'ffffffff-ffff-4fff-8fff-ffffffffffff', post_id: null, last_message_at: 't' })
+    set('profiles:select', [{ user_id: 'ffffffff-ffff-4fff-8fff-ffffffffffff', pseudo: 'Zed' }])
+    const t = await api.openThread('ffffffff-ffff-4fff-8fff-ffffffffffff')
     const ins = opsOf('threads').find(([m]) => m === 'insert')![1][0] as { user_a: string; user_b: string }
     expect(ins.user_a < ins.user_b).toBe(true)
-    expect(t).toMatchObject({ otherId: 'u-zed', otherPseudo: 'Zed' })
-    await expect(api.openThread('u-me')).rejects.toThrow(/vous-même/)
+    expect(t).toMatchObject({ otherId: 'ffffffff-ffff-4fff-8fff-ffffffffffff', otherPseudo: 'Zed' })
+    await expect(api.openThread('11111111-1111-4111-8111-111111111111')).rejects.toThrow(/vous-même/)
   })
   it('sendMessage plafonne à 1000 caractères', async () => {
-    await expect(api.sendMessage('t1', 'x'.repeat(1001))).rejects.toThrow(/1000/)
-    set('messages:insert', { id: 'm1', thread_id: 't1', sender: 'u-me', body: 'Bonjour', created_at: 't' })
-    expect(await api.sendMessage('t1', 'Bonjour')).toMatchObject({ mine: true })
+    await expect(api.sendMessage('bbbbbbb1-0000-4000-8000-000000000001', 'x'.repeat(1001))).rejects.toThrow(/1000/)
+    set('messages:insert', { id: 'ddddddd1-0000-4000-8000-000000000001', thread_id: 'bbbbbbb1-0000-4000-8000-000000000001', sender: '11111111-1111-4111-8111-111111111111', body: 'Bonjour', created_at: 't' })
+    expect(await api.sendMessage('bbbbbbb1-0000-4000-8000-000000000001', 'Bonjour')).toMatchObject({ mine: true })
   })
 })
 
 describe('modération et compte', () => {
   it('report : un doublon est signalé en français', async () => {
     set('reports:insert', null, { message: 'duplicate key ... "reports_reporter_target_kind_target_id_key"', code: '23505' })
-    await expect(api.report('post', 'p1', 'spam')).rejects.toThrow(/déjà signalé/)
+    await expect(api.report('post', 'aaaaaaa1-0000-4000-8000-000000000001', 'spam')).rejects.toThrow(/déjà signalé/)
   })
   it('report refuse un motif inconnu et un détail trop long', async () => {
-    await expect(api.report('post', 'p1', 'nimporte' as never)).rejects.toThrow(/Motif/)
-    await expect(api.report('post', 'p1', 'autre', 'x'.repeat(301))).rejects.toThrow(/300/)
+    await expect(api.report('post', 'aaaaaaa1-0000-4000-8000-000000000001', 'nimporte' as never)).rejects.toThrow(/Motif/)
+    await expect(api.report('post', 'aaaaaaa1-0000-4000-8000-000000000001', 'autre', 'x'.repeat(301))).rejects.toThrow(/300/)
   })
   it('blockUser refuse de se bloquer soi-même', async () => {
-    await expect(api.blockUser('u-me')).rejects.toThrow(/vous-même/)
-    await api.blockUser('u-x')
-    expect(opsOf('blocks')).toContainEqual(['insert', [{ blocker: 'u-me', blocked: 'u-x' }]])
+    await expect(api.blockUser('11111111-1111-4111-8111-111111111111')).rejects.toThrow(/vous-même/)
+    await api.blockUser('33333333-3333-4333-8333-333333333333')
+    expect(opsOf('blocks')).toContainEqual(['insert', [{ blocker: '11111111-1111-4111-8111-111111111111', blocked: '33333333-3333-4333-8333-333333333333' }]])
   })
   it('unblockUser supprime mon blocage', async () => {
-    await api.unblockUser('u-x')
+    await api.unblockUser('33333333-3333-4333-8333-333333333333')
     expect(opsOf('blocks')).toContainEqual(['delete', []])
-    expect(opsOf('blocks')).toContainEqual(['eq', ['blocked', 'u-x']])
+    expect(opsOf('blocks')).toContainEqual(['eq', ['blocked', '33333333-3333-4333-8333-333333333333']])
   })
   it('deleteMyAccount supprime les photos puis appelle delete_my_account', async () => {
     await api.deleteMyAccount()
-    expect(state.remove).toHaveBeenCalledWith(['u-me/a.jpg', 'u-me/b.jpg'])
+    expect(state.remove).toHaveBeenCalledWith(['11111111-1111-4111-8111-111111111111/a.jpg', '11111111-1111-4111-8111-111111111111/b.jpg'])
     expect(state.rpc).toHaveBeenCalledWith('delete_my_account')
   })
   it('deleteMyAccount conserve le compte si les photos ne partent pas', async () => {

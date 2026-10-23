@@ -1561,3 +1561,196 @@ dialog.modal::backdrop {
 .consent-actions {
   justify-content: flex-end;
 }
+
+/* ---------- Entraide entre voisins ---------- */
+.nb-page {
+  max-width: 760px;
+}
+.nb-head {
+  margin-bottom: 12px;
+}
+.nb-head h1 {
+  margin: 0 0 4px;
+  font-size: 1.35rem;
+}
+.nb-page h2 {
+  margin: 0;
+  font-size: 1.1rem;
+}
+.nb-page .tabs {
+  margin-bottom: 12px;
+  overflow-x: visible;
+}
+.nb-page .tabs button {
+  flex: 1 1 auto;
+  padding: 8px 6px;
+  font-size: 0.92rem;
+}
+.nb-toolbar {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.nb-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.nb-toolbar-row {
+  flex-wrap: nowrap;
+}
+.nb-radius {
+  width: auto;
+  min-width: 84px;
+}
+.nb-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.nb-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  width: 100%;
+  min-height: 56px;
+  padding: 12px 14px;
+  text-align: left;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  cursor: pointer;
+}
+.nb-card:hover {
+  background: var(--surface-2);
+}
+.nb-card:focus-visible {
+  outline: 2px solid var(--accent-2);
+  outline-offset: 1px;
+}
+.nb-card-top {
+  gap: 8px;
+}
+.nb-card-title {
+  overflow-wrap: anywhere;
+}
+.nb-empty {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.nb-ideas,
+.nb-rules {
+  margin: 0;
+  padding-left: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.nb-body {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.nb-photo {
+  display: block;
+  max-width: 100%;
+  max-height: 60vh;
+  margin: 0 auto;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+}
+.nb-back {
+  align-self: flex-start;
+}
+.nb-fieldset {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  min-width: 0;
+}
+.nb-fieldset legend {
+  padding: 0;
+  margin-bottom: 6px;
+  font-weight: 600;
+}
+.nb-radio {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 40px;
+}
+.nb-radio input {
+  width: 20px;
+  height: 20px;
+  flex: none;
+}
+.nb-replies {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.nb-replies > li {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+}
+.nb-replies > li:last-child {
+  border-bottom: 0;
+}
+.nb-msgs {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.nb-msg {
+  align-self: flex-start;
+  max-width: 85%;
+  padding: 8px 12px;
+  border-radius: 12px;
+  background: var(--surface-2);
+}
+.nb-msg.mine {
+  align-self: flex-end;
+  background: var(--accent-soft);
+}
+.nb-mine-title {
+  align-self: flex-start;
+  text-align: left;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.nb-dl {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 6px 14px;
+  margin: 0;
+}
+.nb-dl dt {
+  color: var(--muted);
+}
+.nb-dl dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.nb-error p {
+  overflow-wrap: anywhere;
+}
+.nb-toolbar-row .spacer {
+  flex: 1;
+}
