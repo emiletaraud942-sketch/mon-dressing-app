@@ -19,7 +19,7 @@ interface CacheEntry {
 const weatherCache = new Map<string, CacheEntry>()
 
 function loadWeather(center: Garden['center'], force: boolean): Promise<WeatherBundle> {
-  const key = `${center.lon.toFixed(3)},${center.lat.toFixed(3)}`
+  const key = `${center.lon.toFixed(2)},${center.lat.toFixed(2)}`
   const hit = weatherCache.get(key)
   if (!force && hit && Date.now() - hit.t < WEATHER_TTL_MS) return hit.p
   const entry: CacheEntry = { p: fetchWeather(center), t: Date.now() }

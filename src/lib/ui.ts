@@ -1,5 +1,6 @@
 import { useSyncExternalStore } from 'react'
 import type { Category, XY } from '../types'
+import type { LegalId } from './legal'
 
 // État d'interface non persistant, partagé entre la carte, la 3D et les panneaux.
 export type Tab = 'carte' | '3d' | 'plantes' | 'entretien' | 'planter' | 'catalogue' | 'reglages'
@@ -303,4 +304,26 @@ export function closePlantSheet() {
 
 export function getUi() {
   return ui
+}
+
+// ---------- Pages légales (Confidentialité, Mentions légales, CGU) ----------
+// Hors navigation par onglets : elles s'ouvrent aussi sans jardin créé et n'ajoutent rien à l'historique.
+let legalOpen: LegalId | undefined
+const legalListeners = new Set<() => void>()
+export function openLegal(id: LegalId) {
+  legalOpen = id
+  legalListeners.forEach((l) => l())
+}
+export function closeLegal() {
+  legalOpen = undefined
+  legalListeners.forEach((l) => l())
+}
+export function useLegal(): LegalId | undefined {
+  return useSyncExternalStore(
+    (l) => {
+      legalListeners.add(l)
+      return () => legalListeners.delete(l)
+    },
+    () => legalOpen,
+  )
 }

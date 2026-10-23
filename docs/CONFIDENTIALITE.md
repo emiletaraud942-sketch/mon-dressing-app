@@ -1,66 +1,79 @@
-# Politique de confidentialité de PermaJardin
+# Politique de confidentialité
 
-> **Modèle à compléter** par l'éditeur avant publication : remplacer les passages entre crochets `[…]`, vérifier les durées et les lieux d'hébergement auprès de chaque prestataire, et faire relire le texte si l'appli est proposée à un public large. Ce texte décrit ce que fait réellement l'appli (inventaire : `src/lib/security/inventory.ts`). Dernière mise à jour : [date].
+> **BROUILLON À FAIRE VALIDER PAR UN PROFESSIONNEL.** Texte provisoire, à faire valider par un professionnel avant publication. Il ne constitue pas un avis juridique.
+> Version 1.0 · Dernière mise à jour : 23 octobre 2026.
 
 ## En bref
-- **Vos jardins restent sur votre appareil.** PermaJardin enregistre vos données dans votre navigateur. Il n'y a ni publicité, ni statistiques, ni cookie, ni traceur.
-- Quelques services extérieurs reçoivent une partie de vos données **uniquement quand la fonction correspondante l'exige** (carte, météo, identification d'une plante, sauvegarde en ligne facultative).
+
+- Vos jardins, plantes et photos restent sur votre appareil, dans votre navigateur.
+- Pas de compte obligatoire, pas de publicité, pas de cookie, pas de traceur.
+- Quelques services extérieurs reçoivent une partie de vos données uniquement quand la fonction l’exige : carte, météo, identification d’une plante, sauvegarde en ligne facultative.
 - Vous pouvez tout exporter ou tout effacer à tout moment depuis les Réglages.
 
 ## Qui est responsable
-[Nom ou pseudonyme de l'éditeur], [adresse e-mail de contact]. Pour toute question ou demande sur vos données : [adresse e-mail de contact].
-Les données conservées uniquement sur votre appareil ne sont pas accessibles à l'éditeur.
 
-## Quelles données, où, pourquoi, combien de temps
+Éditeur et responsable du traitement : [à compléter] ([à compléter]), [à compléter]. Contact : [à compléter].
 
-| Donnée | Où | Qui la reçoit | Pourquoi | Durée |
-| --- | --- | --- | --- | --- |
-| Jardins (nom, adresse, position, contour de parcelle, bâtiments, relief), plantes (position au mètre près, notes), tâches faites | Votre navigateur (IndexedDB) | Personne | Faire fonctionner la carte, la 3D et le calendrier | Jusqu'à ce que vous les effaciez |
-| Photos de plantes | Votre navigateur | Personne (jamais synchronisées) | Illustrer vos plantes. Elles sont réduites et **leurs informations de prise de vue (GPS, appareil) sont supprimées** | Jusqu'à suppression de la plante ou effacement |
-| Adresse recherchée | Dans votre jardin | IGN Géoplateforme, par l'intermédiaire de notre hébergeur | Trouver l'emplacement | Non conservée par PermaJardin en dehors de votre jardin |
-| Position du jardin | Dans votre jardin ; tuiles de carte dans le cache de l'appli | IGN Géoplateforme et API Carto | Carte, parcelle cadastrale, relief, bâtiments | Cache : 60 jours au plus (tuiles) |
-| Position du jardin (coordonnées) | Cache du navigateur 3 h à 30 jours | Open-Meteo, par l'intermédiaire de notre hébergeur | Prévisions météo et dates de gel | Voir la politique d'Open-Meteo |
-| Photos envoyées pour identification (1 à 5) | Nulle part chez nous : relayées en mémoire | Pl@ntNet, par l'intermédiaire de notre fonction hébergée chez Vercel | Identifier une plante, **seulement si vous cliquez sur « Identifier »** | Non conservées par PermaJardin ; voir la politique de Pl@ntNet |
-| Adresse e-mail, sauvegarde en ligne de vos jardins (sans photos) | Supabase, **seulement si vous créez un compte** | Supabase | Retrouver vos jardins sur un autre appareil | Jusqu'à suppression de votre compte ou de la sauvegarde |
-| Préférences (thème, dates de rappel), jeton de connexion | Votre navigateur (localStorage) | Personne | Confort d'usage, connexion | Jusqu'à effacement |
-| Adresse IP, date, page demandée, navigateur | Journaux techniques de l'hébergeur | Vercel | Sécurité et bon fonctionnement du site | [durée selon l'offre Vercel : à vérifier] |
+Les données conservées uniquement sur votre appareil ne sont pas accessibles à l’éditeur.
 
-Aucune de ces données n'est vendue, ni utilisée pour de la publicité ou du profilage.
+## Données, finalités, destinataires et durées
 
-## Sur quel fondement
-- **Exécution du service que vous demandez** : carte, météo locale, calendrier d'entretien (RGPD art. 6.1.b).
-- **Votre consentement** : identification par photo (vous cliquez), création d'un compte et sauvegarde en ligne (vous vous connectez), rappels (vous acceptez la demande du navigateur). Vous pouvez le retirer à tout moment.
-- **Intérêt légitime** : journaux techniques de sécurité (art. 6.1.f).
+Pour chaque donnée : où elle est stockée, qui la reçoit, pourquoi, sur quelle base et combien de temps.
 
-## Prestataires (sous-traitants)
-- **Vercel Inc.** : hébergement du site, relais des requêtes vers l'IGN et Open-Meteo, fonction d'identification. Vercel peut traiter des données hors de l'Union européenne ; [garanties : clauses contractuelles types / cadre de protection des données UE-États-Unis — à confirmer].
-- **IGN (Géoplateforme, API Carto)** : cartes, géocodage, parcelles, altitude. Service public français.
-- **Open-Meteo** : prévisions et historique météo (usage non commercial). [Localisation de l'hébergement : à vérifier.]
-- **Pl@ntNet** : identification des plantes à partir des photos que vous envoyez.
-- **Supabase** : compte et sauvegarde en ligne, facultatifs. [Région du projet : à préciser.]
+- Jardins : nom, adresse, position du centre, contour de parcelle, bâtiments, relief, plantes (position au mètre près, notes), tâches faites. Stockage : IndexedDB du navigateur (clé permajardin:state:v1) ; copie « avant migration » en cas de correction au chargement. Aucun destinataire extérieur. Finalité : Fournir le service : carte, 3D, calendrier d’entretien. Base : exécution du service demandé. Durée : Jusqu’à effacement par l’utilisateur (ou par le navigateur si le stockage n’est pas persistant). Effacement : Réglages > Effacer toutes mes données (eraseAllData), ou supprimer un jardin.
+- Photos de plantes (réduites à 1280 px maximum, sans EXIF ni position GPS : elles sont ré-encodées par le navigateur). Stockage : IndexedDB du navigateur (clés photo:…). Aucun destinataire extérieur. Finalité : Illustrer les plantes. Base : exécution du service demandé. Durée : Jusqu’à suppression de la plante ou effacement. Effacement : Supprimer la plante, ou Effacer toutes mes données. Les photos ne sont jamais synchronisées..
+- Photos envoyées pour identification (1 à 5 images, organe choisi). Stockage : Aucun stockage chez nous : relayées en mémoire par la fonction /api/identify. Destinataires : Vercel (hébergeur de la fonction) ; Pl@ntNet (identification ; leur politique de confidentialité s’applique). Finalité : Identifier une plante, uniquement quand l’utilisateur clique sur « Identifier ». Base : votre consentement. Durée : Non conservées par PermaJardin. Conservation par Pl@ntNet : voir my.plantnet.org. Effacement : Demande à Pl@ntNet ; rien à effacer chez PermaJardin.
+- Adresse recherchée (texte saisi). Stockage : Dans le jardin créé (voir « jardins »). Destinataires : Vercel (proxy /ext/geopf) ; IGN Géoplateforme (géocodage). Finalité : Trouver l’emplacement du jardin. Base : exécution du service demandé. Durée : Non conservée par PermaJardin hors du jardin créé. Effacement : Effacer toutes mes données.
+- Coordonnées du jardin (parcelle, altitude, bâtiments, orthophoto, tuiles de carte). Stockage : Dans le jardin créé ; tuiles IGN dans le cache du service worker (ign-tuiles, ign-ortho-3d). Destinataires : Vercel (proxys /ext/geopf, /ext/apicarto) ; IGN Géoplateforme et API Carto. Finalité : Afficher la carte, la parcelle, le relief et le bâti. Base : exécution du service demandé. Durée : Tuiles : 60 jours au plus dans le cache ; orthophoto 3D : 14 jours. Effacement : Effacer toutes mes données (vide aussi les caches de tuiles).
+- Coordonnées du jardin envoyées pour la météo et le climat local. Stockage : localStorage (clés pj-meteo:…, pj-climat:… : coordonnées arrondies à 3 décimales dans la clé). Destinataires : Vercel (proxys /ext/meteo, /ext/meteo-archive) ; Open-Meteo. Finalité : Prévisions et calcul des dates de gel pour proposer les tâches. Base : exécution du service demandé. Durée : Cache de 3 h (prévisions) et 30 jours (climat). Effacement : Effacer toutes mes données.
+- Adresse e-mail du compte, instantané en ligne des jardins (sans photos), jeton de session. Stockage : Supabase (table garden_snapshots, protégée par RLS) ; jeton dans le localStorage (clé sb-…-auth-token). Destinataires : Supabase (sous-traitant : hébergement et authentification). Finalité : Sauvegarder et retrouver ses jardins sur un autre appareil. Fonction facultative.. Base : votre consentement. Durée : Jusqu’à suppression du compte ou de l’instantané. Effacement : Réglages > Synchronisation : supprimer mes données en ligne (deleteRemoteSnapshot) ou supprimer mon compte (deleteMyAccount).
+- Préférences et repères : thème, date du dernier export, première utilisation, dernière notification, dernière synchronisation. Stockage : localStorage (clés permajardin:…). Aucun destinataire extérieur. Finalité : Confort d’usage (rappel de sauvegarde, une notification par jour au plus). Base : intérêt légitime (sécurité, confort d’usage). Durée : Jusqu’à effacement. Effacement : Effacer toutes mes données.
+- Adresse IP, date, URL et navigateur de chaque requête (journaux techniques d’hébergement). Stockage : Vercel. Destinataires : Vercel (hébergeur). Finalité : Sécurité et exploitation du site. Base : intérêt légitime (sécurité, confort d’usage). Durée : Selon l’offre Vercel du propriétaire (à vérifier dans le tableau de bord). Effacement : Demande à l’éditeur du site.
 
-Chaque service applique sa propre politique de confidentialité, à laquelle vous pouvez vous référer.
+Aucune de ces données n’est vendue, ni utilisée pour de la publicité ou du profilage.
+
+## Bases légales
+
+- Exécution du service que vous demandez : carte, météo locale, calendrier d’entretien (RGPD, art. 6.1.b).
+- Votre consentement : envoi d’une photo à Pl@ntNet pour l’identification, et sauvegarde en ligne. Il est demandé avant le premier envoi et vous pouvez le retirer à tout moment dans Réglages > Vie privée (art. 6.1.a).
+- Intérêt légitime : journaux techniques de sécurité de l’hébergeur et préférences d’usage (art. 6.1.f).
+
+Information sans blocage : pour afficher la carte et la météo, les coordonnées de votre jardin sont envoyées à l’IGN (Géoplateforme, API Carto) et à Open-Meteo, par l’intermédiaire de notre hébergeur. Ces envois ne contiennent ni votre nom ni votre e-mail.
+
+## Destinataires
+
+- Vercel Inc. (États-Unis) : hébergement du site, relais des requêtes vers l’IGN et Open-Meteo, fonction d’identification.
+- IGN Géoplateforme et API Carto : cartes, géocodage, parcelles, altitude.
+- Open-Meteo : prévisions et historique météo.
+- Pl@ntNet (Cirad, INRAE, Inria, IRD) : identification des plantes à partir des photos que vous envoyez.
+- Supabase : compte et sauvegarde en ligne, seulement si vous activez la synchronisation.
+
+Chaque service applique sa propre politique de confidentialité.
+
+## Transferts hors Union européenne
+
+Vercel est une société américaine : des données techniques (adresse IP, requêtes) peuvent être traitées aux États-Unis. Les garanties applicables (clauses contractuelles types ou cadre de protection des données UE-États-Unis) sont à confirmer par l’éditeur auprès de Vercel.
+
+Le lieu d’hébergement du projet Supabase et d’Open-Meteo est également à confirmer.
 
 ## Cookies et traceurs
-PermaJardin **ne dépose aucun cookie** et n'utilise aucun outil de mesure d'audience ni traceur publicitaire. Le stockage de votre navigateur (IndexedDB, localStorage, cache du service worker) sert uniquement à faire fonctionner l'appli et n'exige donc pas de consentement.
+
+PermaJardin ne dépose aucun cookie et n’utilise ni mesure d’audience ni traceur publicitaire. Le stockage du navigateur (IndexedDB, localStorage, cache de l’appli) sert uniquement à faire fonctionner l’appli.
 
 ## Vos droits
-Vous pouvez à tout moment :
-- **accéder à vos données et les emporter** (portabilité) : Réglages > Exporter une sauvegarde (fichier JSON lisible) ;
-- **les corriger** : directement dans l'appli ;
-- **les effacer** : Réglages > Effacer toutes mes données (appareil), avec, si vous êtes connecté, la suppression de votre sauvegarde en ligne ou de votre compte ;
-- **vous opposer ou limiter** un traitement, ou retirer un consentement : en cessant d'utiliser la fonction concernée ou en nous écrivant à [adresse e-mail de contact] ;
-- **introduire une réclamation** auprès de la CNIL (www.cnil.fr).
 
-Pour les données détenues par un prestataire (par exemple Pl@ntNet pour les photos d'identification), la demande peut aussi lui être adressée directement.
+- Accès et portabilité : Réglages > Sauvegarde > Exporter (fichier JSON lisible).
+- Rectification : directement dans l’appli.
+- Effacement : Réglages > Vie privée > Effacer toutes mes données, avec suppression de la sauvegarde en ligne si vous êtes connecté.
+- Opposition, limitation et retrait du consentement : Réglages > Vie privée > Retirer mon consentement, ou par e-mail à l’éditeur.
+- Réclamation : auprès de la CNIL (www.cnil.fr).
+
+Pour toute demande : [à compléter]. Pour les données détenues par un prestataire (par exemple Pl@ntNet), vous pouvez aussi vous adresser à lui.
 
 ## Sécurité
-Connexions chiffrées (HTTPS), aucune clé secrète dans l'appli, règles d'accès strictes sur la sauvegarde en ligne (chaque compte ne voit que ses propres données), validation de tout fichier importé. Détails techniques : `docs/SECURITE.md`. Pour signaler une faille : `SECURITY.md`.
 
-## Permissions demandées par le navigateur
-- **Notifications** : seulement si vous activez les rappels (un rappel par jour au plus, affiché à l'ouverture de l'appli).
-- **Stockage persistant** : pour que le navigateur n'efface pas vos jardins.
-- **Photos** : vous choisissez vous-même les fichiers ; l'appli n'accède jamais à la caméra ni à votre position de façon automatique.
+Connexions chiffrées (HTTPS), aucune clé secrète dans l’appli, accès à la sauvegarde en ligne limité à son propriétaire, validation de tout fichier importé.
 
 ## Modifications
-Toute modification importante de cette politique sera signalée dans l'appli. [date et version]
+
+Toute modification importante de cette politique sera signalée dans l’appli. La date de dernière mise à jour figure en haut de la page.

@@ -3,10 +3,16 @@
 // (< 10 000 appels/jour, attribution « Weather data by Open-Meteo.com », données CC BY 4.0).
 // Un usage commercial impose un abonnement (customer-api.open-meteo.com).
 // Requêtes via /ext/meteo et /ext/meteo-archive (proxy Vite en dev, rewrites Vercel en prod).
+// Ce module garde le cache, le re-découpage et le calcul du climat ; la source des données
+// est un fournisseur interchangeable (src/lib/weatherProviders, choix par VITE_WEATHER_PROVIDER).
 // PROPRIÉTAIRE : agent dev-cartographie-ign.
-import type { DailyWeather, LonLat, WeatherBundle } from '../types'
-import { isoDate } from './dates'
-import { fetchJson } from './http'
+import type { LonLat, WeatherBundle } from '../types'
+import { getProvider, roundCoord, todayLocal } from './weatherProviders'
+import type { ArchiveDaily } from './weatherProviders'
+import { parseForecast } from './weatherProviders/openMeteo'
+
+export { parseForecast, todayLocal }
+export { getProvider, getWeatherLicense } from './weatherProviders'
 
 export interface ClimateSummary {
   years: number
@@ -64,82 +70,22 @@ function cacheSet(key: string, v: unknown, off?: number): void {
   }
 }
 
-const RETRY_DELAY_MS = 600
-
-/** Erreur réseau ou 5xx/429 (messages de `fetchJson`) : un nouvel essai a une chance de réussir. */
-function isRetryable(e: unknown): boolean {
-  if (!(e instanceof Error) || e.name === 'AbortError') return false
-  return e.message.startsWith('Connexion impossible') || /\((429|5\d\d)\)/.test(e.message)
+/** Clé de cache : fournisseur + coordonnées arrondies à 2 décimales (comme les requêtes). */
+const coordKey = (p: LonLat, providerId: string) => {
+  const q = roundCoord(p)
+  return `${providerId}:${q.lat.toFixed(2)},${q.lon.toFixed(2)}`
 }
-
-/** GET JSON Open-Meteo : délai de 15 s, un seul réessai après 600 ms (appel idempotent). */
-async function getJson<T>(url: string): Promise<T> {
-  const call = () => fetchJson<T>(url, { service: 'Open-Meteo', timeoutMs: 15000 })
-  try {
-    return await call()
-  } catch (e) {
-    if (!isRetryable(e)) throw e
-    await new Promise((r) => setTimeout(r, RETRY_DELAY_MS))
-    return call()
-  }
-}
-
-const coordKey = (p: LonLat) => `${p.lat.toFixed(3)},${p.lon.toFixed(3)}`
 
 /** Date du jour (YYYY-MM-DD) à Paris. Conservée pour compatibilité : préférer `todayLocal`. */
 export function todayParis(now = new Date()): string {
   return now.toLocaleDateString('sv-SE', { timeZone: 'Europe/Paris' })
 }
 
-/**
- * Date du jour (YYYY-MM-DD) au lieu du jardin, d'après son décalage UTC en secondes
- * (`utc_offset_seconds` d'Open-Meteo avec `timezone=auto`). Sans décalage connu : date de l'appareil.
- */
-export function todayLocal(utcOffsetSec?: number | null, now = new Date()): string {
-  if (utcOffsetSec == null || !Number.isFinite(utcOffsetSec)) return isoDate(now)
-  return new Date(now.getTime() + utcOffsetSec * 1000).toISOString().slice(0, 10)
-}
-
 // ---------- prévisions ----------
 
 type Num = number | null
-interface ForecastJson {
-  /** Fournis par Open-Meteo avec timezone=auto. */
-  timezone?: string
-  utc_offset_seconds?: number
-  daily?: {
-    time: string[]
-    temperature_2m_max: Num[]
-    temperature_2m_min: Num[]
-    precipitation_sum: Num[]
-    et0_fao_evapotranspiration: Num[]
-  }
-}
 
 const PAST_DAYS = 7
-
-export function parseForecast(json: ForecastJson, today: string, fetchedAt = new Date().toISOString()): WeatherBundle {
-  const d = json.daily
-  if (!d?.time?.length) throw new Error('Réponse météo inattendue.')
-  const days: DailyWeather[] = []
-  d.time.forEach((date, i) => {
-    const tMin = d.temperature_2m_min?.[i]
-    const tMax = d.temperature_2m_max?.[i]
-    if (tMin == null || tMax == null) return
-    days.push({
-      date,
-      tMin,
-      tMax,
-      rainMm: d.precipitation_sum?.[i] ?? 0,
-      et0Mm: d.et0_fao_evapotranspiration?.[i] ?? 0,
-    })
-  })
-  return {
-    fetchedAt,
-    past: days.filter((x) => x.date < today),
-    forecast: days.filter((x) => x.date >= today),
-  }
-}
 
 /**
  * Re-découpe un bundle selon la date du jour : les jours écoulés passent de `forecast` à `past`
@@ -159,22 +105,17 @@ export function resliceBundle(b: WeatherBundle, today: string): WeatherBundle {
  * Hors ligne ou service en panne : repli sur le cache expiré, marqué `stale: true` (`fetchedAt` = date des données).
  */
 export async function fetchWeather(p: LonLat, now: Date = new Date()): Promise<WeatherBundle> {
-  const key = `pj-meteo:${coordKey(p)}`
+  const provider = getProvider()
+  const key = `pj-meteo:${coordKey(p, provider.id)}`
   const entry = cacheRead<WeatherBundle>(key)
   const fromCache = (stale: boolean): WeatherBundle => {
     const b = resliceBundle(entry!.v, todayLocal(entry!.off, now))
     return stale ? { ...b, stale: true } : b
   }
   if (entry && Date.now() - entry.t < WEATHER_TTL) return fromCache(false)
-  const url =
-    `/ext/meteo/v1/forecast?latitude=${p.lat.toFixed(4)}&longitude=${p.lon.toFixed(4)}` +
-    '&daily=temperature_2m_max,temperature_2m_min,precipitation_sum,et0_fao_evapotranspiration' +
-    '&past_days=7&forecast_days=7&timezone=auto'
   try {
-    const json = await getJson<ForecastJson>(url)
-    const off = typeof json.utc_offset_seconds === 'number' ? json.utc_offset_seconds : undefined
-    const bundle = parseForecast(json, todayLocal(off, now), now.toISOString())
-    cacheSet(key, bundle, off)
+    const { bundle, utcOffsetSec } = await provider.fetchForecast(p, undefined, now)
+    cacheSet(key, bundle, utcOffsetSec)
     return bundle
   } catch (e) {
     if (entry) return fromCache(true)
@@ -262,16 +203,24 @@ export function computeClimate(json: ArchiveJson): ClimateSummary {
   }
 }
 
+/** Historique neutre d'un fournisseur → format de `computeClimate`. */
+function archiveToJson(days: ArchiveDaily[]): ArchiveJson {
+  return {
+    daily: {
+      time: days.map((d) => d.date),
+      temperature_2m_min: days.map((d) => d.tMin),
+      temperature_2m_max: days.map((d) => d.tMax),
+      precipitation_sum: days.map((d) => d.rainMm),
+    },
+  }
+}
+
 export async function fetchClimate(p: LonLat): Promise<ClimateSummary> {
-  const key = `pj-climat:${coordKey(p)}`
+  const provider = getProvider()
+  const key = `pj-climat:${coordKey(p, provider.id)}`
   const cached = cacheGet<ClimateSummary>(key, CLIMATE_TTL)
   if (cached) return cached
-  const lastYear = Number(isoDate().slice(0, 4)) - 1
-  const url =
-    `/ext/meteo-archive/v1/archive?latitude=${p.lat.toFixed(4)}&longitude=${p.lon.toFixed(4)}` +
-    `&start_date=${lastYear - 4}-01-01&end_date=${lastYear}-12-31` +
-    '&daily=temperature_2m_min,temperature_2m_max,precipitation_sum&timezone=auto'
-  const summary = computeClimate(await getJson<ArchiveJson>(url))
+  const summary = computeClimate(archiveToJson(await provider.fetchArchive(p, 5)))
   cacheSet(key, summary)
   return summary
 }
