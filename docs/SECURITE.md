@@ -105,7 +105,7 @@ Déjà fait (`PrivacyCard.tsx`) : `eraseAllData({ remote: 'none' | 'snapshot' })
 
 Fait depuis : import par `readBackupFile`, consentements (Pl@ntNet, synchro, entraide), textes légaux. Reste à faire :
 1. ~~Importer~~ (fait).
-2. **Suppression du compte de synchronisation** (voir §9, constat O1) : proposer `remote: 'account'` dans l'effacement et, dans Synchronisation, « Supprimer mes données en ligne » (`deleteRemoteSnapshot()`) et « Supprimer mon compte » (`deleteMyAccount()`) de `lib/sync` ; ces fonctions et `eraseAllData({ remote: 'account' })` existent et sont testées, mais aucun écran ne les appelle. Gérer l'erreur `Adresse e-mail invalide.` de `sendMagicLink`.
+2. ~~Suppression du compte de synchronisation~~ (fait : « Effacer toutes mes données » propose trois niveaux, dont la suppression du compte de synchro et du compte d'entraide ; voir §9, constat O1). Ancien énoncé : proposer `remote: 'account'` dans l'effacement et, dans Synchronisation, « Supprimer mes données en ligne » (`deleteRemoteSnapshot()`) et « Supprimer mon compte » (`deleteMyAccount()`) de `lib/sync` ; ces fonctions et `eraseAllData({ remote: 'account' })` existent et sont testées, mais aucun écran ne les appelle. Gérer l'erreur `Adresse e-mail invalide.` de `sendMagicLink`.
 3. **Confidentialité** : afficher aussi le texte de `docs/CONFIDENTIALITE.md` (une fois complété) ; lien depuis l'écran d'accueil.
 4. **Consentements** : avant le premier envoi de photo à l'identification (« vos photos sont envoyées à Pl@ntNet via notre serveur ; PermaJardin ne les conserve pas ») et avant la première synchronisation (adresse et position envoyées à Supabase).
 5. Message d'erreur de `savePhoto` : « Cette photo est trop grande… » (nouveau cas).
@@ -176,7 +176,7 @@ Périmètre : tout le dépôt sur la branche courante (front, `api/`, `vercel.js
 
 | # | Gravité | Constat | Action |
 | --- | --- | --- | --- |
-| O1 | Élevée (conformité) | Aucun écran n'appelle `deleteMyAccount()` ni `eraseAllData({ remote: 'account' })` : l'adresse e-mail du compte de synchro ne peut pas être supprimée par la personne. « Effacer toutes mes données » (`PrivacyCard.tsx`) ne propose que `snapshot`, et ne dit rien du compte et des annonces de l'entraide, qui restent en ligne (seule la session est fermée). | UI : case « Supprimer aussi mon compte » (`remote: 'account'`), et, pour l'entraide, renvoi vers Entraide > Mon compte (ou appel de `deleteMyAccount` de `neighbors/api`). En attendant, le texte dit d'écrire à l'éditeur : il faut une adresse de contact (voir O3) |
+| O1 | ~~Élevée (conformité)~~ **Corrigé** | Aucun écran n'appelle `deleteMyAccount()` ni `eraseAllData({ remote: 'account' })` : l'adresse e-mail du compte de synchro ne peut pas être supprimée par la personne. « Effacer toutes mes données » (`PrivacyCard.tsx`) ne propose que `snapshot`, et ne dit rien du compte et des annonces de l'entraide, qui restent en ligne (seule la session est fermée). | UI : case « Supprimer aussi mon compte » (`remote: 'account'`), et, pour l'entraide, renvoi vers Entraide > Mon compte (ou appel de `deleteMyAccount` de `neighbors/api`). En attendant, le texte dit d'écrire à l'éditeur : il faut une adresse de contact (voir O3) |
 | O2 | Moyenne | `maplibre-gl` ≤ 6.4.0 : avis critique GHSA-jrc7-96c5-q579 (la CI le tolère avec `continue-on-error`) | Non exploitable ici (fonction absente de 4.7.1, attribution constante). Planifier la montée en 6.x avec l'agent cartographie, puis retirer `continue-on-error` |
 | O3 | Moyenne | Champs légaux `[à compléter]` (éditeur, adresse, contact, hébergeur Supabase) et contact de `SECURITY.md` ; les textes de consentement affirment « Supabase, UE » alors que la politique dit « à confirmer » | Créer les projets Supabase en région UE avant publication ; compléter `legal.ts` ; faire valider par un professionnel ; activer « Private vulnerability reporting » sur GitHub |
 | O4 | Moyenne | « Annonces supprimées après 60 jours, photos comprises » n'est vrai que si `neighbors_purge_expired()` et `neighbors_orphan_photos()` sont planifiés et si les fichiers listés sont effacés par l'API Storage : rien ne le fait automatiquement | Planification quotidienne (pg_cron + fonction ou script avec clé `service_role` hors dépôt) avant l'ouverture publique |
@@ -199,7 +199,7 @@ Périmètre : tout le dépôt sur la branche courante (front, `api/`, `vercel.js
 3. Planifier la purge quotidienne (O4) et prévoir la suppression des comptes inactifs.
 4. Vercel : `PLANTNET_API_KEY` en Production seulement et *Sensitive* ; règle de pare-feu sur `/api/identify` et `/ext/*` ; Deployment Protection sur les prévisualisations ; ne pas mettre les variables `VITE_NEIGHBORS_*` en Preview (elles pointent sur la production).
 5. GitHub : protection de `main`, 2FA, secret scanning et push protection, Dependabot, signalement privé de vulnérabilités.
-6. Faire brancher par l'agent interface les écrans de suppression de compte (O1) et faire valider les textes légaux (O3).
+6. Faire valider les textes légaux (O3).
 
 **Zones non couvertes, et pourquoi**
 - Projets Supabase, Vercel et GitHub réels : consigne de n'y rien exécuter. Non testés : PostgREST (limites de lignes, en-têtes), service Storage (type MIME réel, taille), Auth (limites d'envoi, CAPTCHA), pare-feu Vercel, comportement exact des rewrites externes (en-têtes transmis, mise en cache).

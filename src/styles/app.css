@@ -1768,3 +1768,19 @@ select.nb-radius {
   cursor: pointer;
   font: inherit;
 }
+
+/* Case ou bouton radio + texte long : reste sur la même ligne, cible ≥ 40 px. */
+.check-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  min-height: 40px;
+  cursor: pointer;
+}
+.check-row input {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  margin: 1px 0 0;
+  accent-color: var(--accent);
+}

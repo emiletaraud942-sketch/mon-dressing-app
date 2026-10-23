@@ -1,9 +1,10 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Icon } from '../../components/Icon'
 import { Modal } from '../../components/Modal'
 import { exportCurrentState } from '../../lib/backup'
 import { showToast } from '../../lib/toast'
 import { eraseAllData, type EraseReport } from '../../lib/security/erase'
+import { ERASE_LEVELS, availableLevels, canErase, levelToRemote, remoteLeftOnline, type EraseLevel } from '../../lib/security/eraseLevels'
 import { DATA_INVENTORY, PERMISSIONS } from '../../lib/security/inventory'
 import { consentDate, revokeConsent, useConsents, type ConsentId } from '../../lib/consent'
 import { neighborsEnabled } from '../../lib/neighbors/enabled'
@@ -22,20 +23,59 @@ const STEP_LABEL: Record<string, string> = {
 }
 
 function EraseDialog({ onClose }: { onClose: () => void }) {
-  const [remote, setRemote] = useState(false)
+  const [level, setLevel] = useState<EraseLevel>('device')
+  const [accountOk, setAccountOk] = useState(false)
+  const [hasSync, setHasSync] = useState(false)
+  const [hasNeighbors, setHasNeighbors] = useState(false)
+  const [delNeighbors, setDelNeighbors] = useState(false)
   const [sure, setSure] = useState(false)
   const [busy, setBusy] = useState(false)
   const [report, setReport] = useState<EraseReport>()
 
+  useEffect(() => {
+    let alive = true
+    if (syncConfigured)
+      import('../../lib/sync')
+        .then((m) => m.currentUser())
+        .then((u) => alive && setHasSync(!!u))
+        .catch(() => {})
+    if (voisinsConfigured)
+      import('../../lib/neighbors/api')
+        .then((m) => m.getSession())
+        .then((x) => alive && setHasNeighbors(!!x))
+        .catch(() => {})
+    return () => {
+      alive = false
+    }
+  }, [])
+
+  const levels = availableLevels(hasSync)
+
   async function run() {
     setBusy(true)
     try {
-      const r = await eraseAllData({ remote: remote ? 'snapshot' : 'none' })
+      // Entraide d'abord : il faut encore être connecté. Un échec arrête tout, rien n'est effacé.
+      if (hasNeighbors && delNeighbors) {
+        try {
+          const api = await import('../../lib/neighbors/api')
+          await api.deleteMyAccount()
+        } catch (e) {
+          showToast({ message: `Compte d’entraide non supprimé, rien n’a été effacé. ${e instanceof Error ? e.message : ''}`.trim(), durationMs: 20000, tone: 'error' })
+          return
+        }
+      }
+      const r = await eraseAllData({ remote: levelToRemote(level) })
       // L'écran Réglages disparaît dès que le dernier jardin est effacé : le résultat passe par un message qui survit.
       const failed = r.steps.filter((s) => !s.ok).map((s) => STEP_LABEL[s.id] ?? s.id)
+      const left = remoteLeftOnline(level, hasSync, hasNeighbors, delNeighbors)
+      const done = [level === 'snapshot' ? 'sauvegarde en ligne supprimée' : '', level === 'account' ? 'compte de synchronisation supprimé' : '', hasNeighbors && delNeighbors ? 'compte d’entraide supprimé' : '']
+        .filter(Boolean)
+        .join(', ')
       showToast({
-        message: r.ok ? 'Toutes vos données ont été effacées de cet appareil.' : `Effacement incomplet : ${failed.join(', ')}. Réessayez ou videz les données du site dans votre navigateur.`,
-        durationMs: r.ok ? 8000 : 20000,
+        message: r.ok
+          ? `Toutes vos données ont été effacées de cet appareil${done ? ` (${done})` : ''}.${left.length ? ` Restent en ligne : ${left.join(', ')}.` : ''}`
+          : `Effacement incomplet : ${failed.join(', ')}. Réessayez ou videz les données du site dans votre navigateur.`,
+        durationMs: r.ok ? 12000 : 20000,
         tone: r.ok ? 'info' : 'error',
       })
       setReport(r)
@@ -78,13 +118,38 @@ function EraseDialog({ onClose }: { onClose: () => void }) {
       <button className="btn" onClick={() => exportCurrentState('permajardin-avant-effacement')}>
         <Icon name="download" /> Exporter une sauvegarde d’abord
       </button>
-      {syncConfigured && (
-        <label className="row small" style={{ gap: 8, marginTop: 12 }}>
-          <input type="checkbox" checked={remote} onChange={(e) => setRemote(e.target.checked)} />
-          Supprimer aussi ma sauvegarde en ligne
-        </label>
+      {levels.length > 1 && (
+        <fieldset className="stack" style={{ border: 0, padding: 0, margin: '12px 0 0' }}>
+          <legend className="small"><strong>Que supprimer en ligne ?</strong></legend>
+          {ERASE_LEVELS.map((l) => (
+            <label key={l.id} className="check-row small">
+              <input type="radio" name="erase-level" checked={level === l.id} onChange={() => setLevel(l.id)} />
+              <span>
+                <strong>{l.label}</strong>
+                <span className="muted" style={{ display: 'block' }}>{l.detail}</span>
+              </span>
+            </label>
+          ))}
+          {level === 'account' && (
+            <label className="check-row small">
+              <input type="checkbox" checked={accountOk} onChange={(e) => setAccountOk(e.target.checked)} />
+              Je confirme la suppression de mon compte de synchronisation et de mon adresse e-mail
+            </label>
+          )}
+        </fieldset>
       )}
-      <label className="row small" style={{ gap: 8, marginTop: 8 }}>
+      {hasNeighbors && (
+        <div className="stack small" style={{ marginTop: 12 }}>
+          <p style={{ margin: 0 }}>
+            <strong>Entraide :</strong> vos annonces et votre compte d’entraide restent en ligne si vous ne les supprimez pas ici. Effacer cet appareil ne les retire pas.
+          </p>
+          <label className="check-row small">
+            <input type="checkbox" checked={delNeighbors} onChange={(e) => setDelNeighbors(e.target.checked)} />
+            Supprimer aussi mon compte d’entraide, mes annonces, photos et messages
+          </label>
+        </div>
+      )}
+      <label className="check-row small" style={{ marginTop: 8 }}>
         <input type="checkbox" checked={sure} onChange={(e) => setSure(e.target.checked)} />
         Je comprends que cette action ne peut pas être annulée
       </label>
@@ -92,7 +157,7 @@ function EraseDialog({ onClose }: { onClose: () => void }) {
         <button className="btn" onClick={onClose}>
           Annuler
         </button>
-        <button className="btn danger" disabled={!sure || busy} onClick={run}>
+        <button className="btn danger" disabled={!canErase(level, sure, accountOk, busy)} onClick={run}>
           {busy ? <span className="spinner" /> : <Icon name="trash" size={16} />} Tout effacer
         </button>
       </div>
