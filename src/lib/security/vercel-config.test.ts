@@ -100,7 +100,8 @@ describe('en-têtes de sécurité', () => {
     expect(csp['frame-src']).toEqual(["'none'"])
     expect(csp['base-uri']).toEqual(["'self'"])
     expect(csp['form-action']).toEqual(["'self'"])
-    expect(csp['connect-src']).toEqual(["'self'", 'https://*.supabase.co', 'wss://*.supabase.co'])
+    // Pas de Realtime (WebSocket) : seul HTTPS vers Supabase est autorisé.
+    expect(csp['connect-src']).toEqual(["'self'", 'https://*.supabase.co'])
     expect(csp['upgrade-insecure-requests']).toEqual([])
     expect(globalHeaders['Content-Security-Policy']).not.toMatch(/unsafe-eval|http:|\*\s|;\s*\*/)
   })

@@ -429,3 +429,14 @@ describe('inventaire des données', () => {
     for (const p of PERMISSIONS) expect(p.siRefusee.length).toBeGreaterThan(3)
   })
 })
+
+describe('catalogue : identifiants hostiles', () => {
+  it('un identifiant d’espèce comme « constructor » ou « toString » ne désigne aucune fiche', async () => {
+    const { SPECIES_BY_ID, getSpecies, SPECIES } = await import('../../data/species')
+    for (const id of ['constructor', 'toString', '__proto__', 'hasOwnProperty', 'valueOf', 'prototype']) {
+      expect(SPECIES_BY_ID[id], id).toBeUndefined()
+      expect(getSpecies(id), id).toBeUndefined()
+    }
+    expect(getSpecies(SPECIES[0].id)).toBe(SPECIES[0])
+  })
+})

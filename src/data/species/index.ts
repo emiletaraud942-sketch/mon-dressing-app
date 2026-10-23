@@ -17,7 +17,9 @@ export const SPECIES: Species[] = [
   ...ARBRES_HAIES,
 ].sort((a, b) => a.nomCommun.localeCompare(b.nomCommun, 'fr'))
 
-export const SPECIES_BY_ID: Record<string, Species> = Object.fromEntries(SPECIES.map((s) => [s.id, s]))
+// Sans prototype : `SPECIES_BY_ID['constructor']` ou `['toString']` (identifiant venu d'une annonce d'un autre membre, d'un import ou
+// d'une synchro) renvoie `undefined`, jamais une fonction d'Object.
+export const SPECIES_BY_ID: Record<string, Species> = Object.assign(Object.create(null), Object.fromEntries(SPECIES.map((s) => [s.id, s])))
 
 export function getSpecies(id: string): Species | undefined {
   return SPECIES_BY_ID[id]

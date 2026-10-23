@@ -151,6 +151,26 @@ export function clientIp(h: Headers, fallback?: string): string {
   return first(header(h, 'x-vercel-forwarded-for')) || header(h, 'x-real-ip')?.trim() || xff?.[xff.length - 1] || fallback || 'inconnue'
 }
 
+/**
+ * Clé de limitation de débit : l'adresse IPv4 telle quelle, mais un réseau IPv6 en entier (/64). Un abonné IPv6 reçoit au moins un /64
+ * (2^64 adresses) : limiter par adresse complète lui laisserait contourner la limite par IP en changeant d'adresse à chaque requête.
+ */
+export function rateKey(ip: string): string {
+  const v = ip.trim().toLowerCase().replace(/^\[|\]$/g, '').replace(/%.*$/, '')
+  const mapped = /^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/.exec(v)
+  if (mapped) return mapped[1]
+  if (!v.includes(':')) return v
+  let groups: string[]
+  if (v.includes('::')) {
+    const [a, b = ''] = v.split('::')
+    const left = a ? a.split(':') : []
+    const right = b ? b.split(':') : []
+    groups = [...left, ...Array<string>(Math.max(0, 8 - left.length - right.length)).fill('0'), ...right]
+  } else groups = v.split(':')
+  if (groups.length !== 8 || groups.some((g) => !/^[0-9a-f]{1,4}$/.test(g))) return v
+  return `${groups.slice(0, 4).map((g) => g.replace(/^0+(?=.)/, '')).join(':')}::/64`
+}
+
 /** Message d'erreur sans URL ni clé (un échec de `fetch` peut contenir l'URL avec `api-key=`). */
 export function scrubError(e: unknown, secret?: string): string {
   const parts: string[] = []
@@ -237,7 +257,7 @@ async function handle(req: VercelRequest, res: VercelResponse) {
   }
   if (!isAllowedOrigin(req.headers)) return res.status(403).json({ error: 'Origine non autorisée.' })
 
-  const limit = limiter.check(clientIp(req.headers, req.socket?.remoteAddress))
+  const limit = limiter.check(rateKey(clientIp(req.headers, req.socket?.remoteAddress)))
   const globalLimit = limit.allowed ? globalLimiter.check('tous') : limit
   if (!limit.allowed || !globalLimit.allowed) {
     res.setHeader('Retry-After', String(Math.max(limit.retryAfterSec, globalLimit.retryAfterSec)))

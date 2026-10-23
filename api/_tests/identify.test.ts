@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { VercelRequest, VercelResponse } from '@vercel/node'
-import handler, { clientIp, createRateLimiter, decodeBase64Image, detectImageMime, imageSize, interpretPlantnet, isAllowedOrigin, MAX_BODY_BYTES, scrubError } from '../identify'
+import handler, { clientIp, createRateLimiter, decodeBase64Image, detectImageMime, imageSize, interpretPlantnet, isAllowedOrigin, MAX_BODY_BYTES, rateKey, scrubError } from '../identify'
 
 /** JPEG minimal avec un segment SOF0 (dimensions déclarées). */
 const jpeg = (w = 640, h = 480) => Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0, 4, 0x4a, 0x46, 0xff, 0xc0, 0, 17, 8, h >> 8, h & 255, w >> 8, w & 255, 3, 1, 0x22, 0, 2, 0x11, 1, 3, 0x11, 1, 0xff, 0xd9])
@@ -128,6 +128,29 @@ describe('clientIp', () => {
     expect(clientIp({ 'x-real-ip': '5.6.7.8' })).toBe('5.6.7.8')
     expect(clientIp({}, '9.9.9.9')).toBe('9.9.9.9')
     expect(clientIp({})).toBe('inconnue')
+  })
+})
+
+describe('rateKey : un abonné IPv6 ne contourne pas la limite en changeant d’adresse', () => {
+  it('regroupe tout un /64, garde l’IPv4 et normalise IPv4 mappée / crochets / zone', () => {
+    const a = rateKey('2001:db8:85a3:1:aaaa:bbbb:cccc:dddd')
+    expect(a).toBe('2001:db8:85a3:1::/64')
+    expect(rateKey('2001:0db8:85a3:0001:0000:0000:0000:0001')).toBe(a)
+    expect(rateKey('2001:db8:85a3:1::1')).toBe(a)
+    expect(rateKey('[2001:DB8:85A3:1::ffff]')).toBe(a)
+    expect(rateKey('2001:db8:85a3:2::1')).not.toBe(a) // autre /64
+    expect(rateKey('fe80::1%eth0')).toBe('fe80:0:0:0::/64')
+    expect(rateKey('::ffff:203.0.113.7')).toBe('203.0.113.7')
+    expect(rateKey('203.0.113.7')).toBe('203.0.113.7')
+    expect(rateKey('inconnue')).toBe('inconnue')
+    expect(rateKey('n:importe:quoi:::')).toBe('n:importe:quoi:::') // illisible : tel quel
+  })
+  it('le limiteur voit une seule clé pour 1 000 adresses d’un même /64', () => {
+    const lim = createRateLimiter(3, 60_000)
+    let refused = 0
+    for (let i = 0; i < 1000; i++) if (!lim.check(rateKey(`2001:db8:1:2:${i.toString(16)}::${i.toString(16)}`)).allowed) refused++
+    expect(refused).toBe(997)
+    expect(lim.size()).toBe(1)
   })
 })
 
