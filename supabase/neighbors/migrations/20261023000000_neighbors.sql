@@ -83,12 +83,16 @@ create table if not exists public.reports (
 create table if not exists public.blocks (
   blocker    uuid not null default auth.uid() references public.profiles (user_id) on delete cascade,
   blocked    uuid not null references public.profiles (user_id) on delete cascade,
+  blocked_pseudo text,                          -- recopié par déclencheur : permet d'afficher la liste des personnes bloquées
   created_at timestamptz not null default now(),
   primary key (blocker, blocked),
   check (blocker <> blocked)
 );
 
 -- Compteurs de quotas par jour. Ils ne baissent JAMAIS : supprimer une annonce ne rend pas le quota.
+-- Mise à niveau d'une base créée avant l'ajout de blocked_pseudo.
+alter table public.blocks add column if not exists blocked_pseudo text;
+
 create table if not exists public.quotas (
   user_id uuid not null references auth.users (id) on delete cascade,
   action  text not null,
@@ -268,6 +272,22 @@ drop trigger if exists neighbors_message_after_insert on public.messages;
 create trigger neighbors_message_after_insert after insert on public.messages
   for each row execute function public.neighbors_message_after_insert();
 
+-- Blocage : mémorise le pseudo de la personne bloquée (son profil n'est plus lisible une fois bloquée).
+create or replace function public.neighbors_block_before_insert()
+returns trigger language plpgsql security definer
+set search_path = ''
+as $$
+begin
+  select pseudo into new.blocked_pseudo from public.profiles where user_id = new.blocked;
+  new.created_at := now();
+  perform public.neighbors_take_quota(new.blocker, 'block', 50);
+  return new;
+end;
+$$;
+drop trigger if exists neighbors_block_before_insert on public.blocks;
+create trigger neighbors_block_before_insert before insert on public.blocks
+  for each row execute function public.neighbors_block_before_insert();
+
 -- Signalement : cible existante, pas d'auto-signalement, message visible du signaleur, quota.
 create or replace function public.neighbors_report_before_insert()
 returns trigger language plpgsql security definer
@@ -334,6 +354,7 @@ revoke all on function public.neighbors_reply_before_insert() from public, anon,
 revoke all on function public.neighbors_thread_before_insert() from public, anon, authenticated;
 revoke all on function public.neighbors_message_before_insert() from public, anon, authenticated;
 revoke all on function public.neighbors_message_after_insert() from public, anon, authenticated;
+revoke all on function public.neighbors_block_before_insert() from public, anon, authenticated;
 revoke all on function public.neighbors_report_before_insert() from public, anon, authenticated;
 revoke all on function public.neighbors_report_after_insert() from public, anon, authenticated;
 revoke all on function public.neighbors_take_quota(uuid, text, integer) from public, anon, authenticated;

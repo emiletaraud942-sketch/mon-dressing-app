@@ -1,0 +1,609 @@
+// Entraide entre voisins : accès aux données (projet Supabase dédié). Toutes les fonctions lèvent `NeighborsError`
+// avec un message en français. Les limites sont vérifiées AVANT l'envoi ; la base les impose de toute façon (RLS, triggers).
+import type { SupabaseClient } from '@supabase/supabase-js'
+import { compressToTarget } from '../photos'
+import { jpegMetadataSegments } from '../security/image'
+import { cellBounds, cellDistanceKm, distanceLabel, isValidCoord, roundCell } from './cell'
+import { isNeighborsConfigured, neighborsClient, NEIGHBORS_STORAGE_KEY } from './client'
+import {
+  NEIGHBORS_LIMITS as L,
+  POST_KINDS,
+  REPORT_REASONS,
+  type BlockedUser,
+  type Cell,
+  type InitNeighborsResult,
+  type ListPostsOptions,
+  type Message,
+  type NeighborsSession,
+  type NewPost,
+  type Post,
+  type PostKind,
+  type Profile,
+  type Reply,
+  type ReportReason,
+  type ReportTarget,
+  type Thread,
+} from './types'
+
+export { isNeighborsConfigured }
+
+// ---------- Erreurs ----------
+
+export class NeighborsError extends Error {
+  readonly code?: string
+  constructor(message: string, code?: string) {
+    super(message)
+    this.name = 'NeighborsError'
+    this.code = code
+  }
+}
+
+interface RawError {
+  message?: string
+  code?: string
+  status?: number
+  name?: string
+}
+
+const QUOTA_TEXT: Record<string, string> = {
+  post: `Limite atteinte : ${L.postsPerDay} annonces par jour. Revenez demain.`,
+  reply: `Limite atteinte : ${L.repliesPerDay} réponses par jour. Revenez demain.`,
+  message: `Limite atteinte : ${L.messagesPerDay} messages par jour. Revenez demain.`,
+  report: `Limite atteinte : ${L.reportsPerDay} signalements par jour. Revenez demain.`,
+  thread: 'Limite atteinte : 10 nouvelles conversations par jour. Revenez demain.',
+  block: 'Limite atteinte : trop de blocages aujourd’hui. Revenez demain.',
+}
+
+/** Traduit une erreur Supabase / Postgres / réseau en message français lisible. */
+export function translateError(e: unknown): string {
+  const err = (e ?? {}) as RawError
+  const msg = String(err.message ?? (typeof e === 'string' ? e : ''))
+  const low = msg.toLowerCase()
+  const quota = /quota_exceeded:(\w+)/.exec(msg)
+  if (quota) return QUOTA_TEXT[quota[1]] ?? 'Limite journalière atteinte. Revenez demain.'
+  if (low.includes('profiles_pseudo_key')) return 'Ce pseudo est déjà pris. Choisissez-en un autre.'
+  if (low.includes('reports_reporter_target_kind_target_id_key')) return 'Vous avez déjà signalé ce contenu. Merci.'
+  if (low.includes('blocks_pkey')) return 'Cette personne est déjà bloquée.'
+  if (low.includes('threads_user_a_user_b_key')) return 'Une conversation existe déjà avec cette personne.'
+  if (low.includes('not_member')) return 'Votre profil est absent ou suspendu. Créez-le dans l’entraide, ou contactez l’éditeur.'
+  if (low.includes('reply_not_allowed')) return 'On ne peut répondre qu’à une question encore ouverte.'
+  if (low.includes('report_self')) return 'Vous ne pouvez pas vous signaler vous-même.'
+  if (low.includes('report_target_not_found')) return 'Ce contenu n’existe plus.'
+  if (low.includes('over_email_send_rate_limit') || low.includes('email rate limit') || err.status === 429 || low.includes('rate limit')) {
+    return 'Trop de demandes. Patientez quelques minutes avant de réessayer.'
+  }
+  if (low.includes('jwt') || low.includes('refresh token') || low.includes('not authenticated') || err.code === 'PGRST301' || err.status === 401) {
+    return 'Session expirée. Reconnectez-vous avec un nouveau lien.'
+  }
+  if (err.code === '42501' || low.includes('row-level security') || low.includes('permission denied')) {
+    return 'Action non autorisée. Vérifiez que vous êtes connecté et que votre profil existe.'
+  }
+  if (err.code === '23514') return 'Les informations envoyées dépassent les limites autorisées.'
+  if (err.code === '23503') return 'Ce contenu n’existe plus.'
+  if (low.includes('signups not allowed') || (low.includes('email address') && low.includes('invalid'))) return 'Adresse e-mail refusée. Vérifiez-la.'
+  if (low.includes('failed to fetch') || low.includes('networkerror') || low.includes('load failed')) return 'Connexion impossible. Vérifiez votre accès à Internet.'
+  // Messages déjà en français (http.ts : délai dépassé, connexion impossible) ou erreurs locales.
+  if (e instanceof NeighborsError) return e.message
+  if (/[éèàçêô]|Réessayez|Vérifiez|impossible/.test(msg)) return msg
+  return 'Une erreur est survenue. Réessayez dans un instant.'
+}
+
+const fail = (e: unknown): never => {
+  if (e instanceof NeighborsError) throw e
+  throw new NeighborsError(translateError(e), (e as RawError | undefined)?.code)
+}
+
+function sb(): SupabaseClient {
+  const c = neighborsClient()
+  if (!c) throw new NeighborsError('L’entraide entre voisins n’est pas activée sur cette installation.', 'not_configured')
+  return c
+}
+
+/** Exécute une requête Supabase, renvoie `data` ou lève une erreur traduite. */
+async function run<T>(q: PromiseLike<{ data: T | null; error: unknown }>): Promise<T | null> {
+  let res: { data: T | null; error: unknown }
+  try {
+    res = await q
+  } catch (e) {
+    return fail(e)
+  }
+  if (res.error) fail(res.error)
+  return res.data
+}
+
+// ---------- Validation (avant envoi) ----------
+
+const CONTROL = /[\u0000-\u001f\u007f<>]/
+
+export function validatePseudo(raw: string): string {
+  const p = raw.trim()
+  if (p.length < L.pseudoMin || p.length > L.pseudoMax) throw new NeighborsError(`Le pseudo doit faire entre ${L.pseudoMin} et ${L.pseudoMax} caractères.`, 'invalid')
+  if (CONTROL.test(p)) throw new NeighborsError('Le pseudo contient des caractères interdits (< > ou caractères de contrôle).', 'invalid')
+  return p
+}
+
+function validateText(raw: string, label: string, max: number, required: boolean): string {
+  const t = raw.replace(/\r\n/g, '\n').trim()
+  if (required && !t) throw new NeighborsError(`${label} : ce champ est obligatoire.`, 'invalid')
+  if (t.length > max) throw new NeighborsError(`${label} : ${max} caractères au maximum (${t.length} saisis).`, 'invalid')
+  return t
+}
+
+export interface ValidPost {
+  kind: PostKind
+  title: string
+  body: string
+  speciesId: string | null
+}
+
+export function validatePost(input: Pick<NewPost, 'kind' | 'title' | 'body' | 'speciesId'>): ValidPost {
+  if (!POST_KINDS.includes(input.kind)) throw new NeighborsError('Type d’annonce inconnu.', 'invalid')
+  const species = input.speciesId?.trim() || null
+  if (species && species.length > L.speciesIdMax) throw new NeighborsError('Espèce invalide.', 'invalid')
+  return {
+    kind: input.kind,
+    title: validateText(input.title, 'Titre', L.titleMax, true),
+    body: validateText(input.body ?? '', 'Description', L.bodyMax, false),
+    speciesId: species,
+  }
+}
+
+export const validateMessage = (raw: string, label = 'Message') => validateText(raw, label, L.messageMax, true)
+
+// ---------- Connexion ----------
+
+const isEmail = (e: string) => e.length <= 254 && /^[^\s@<>"',;]+@[^\s@<>"',;]+\.[^\s@<>"',;]+$/.test(e)
+
+/** Marqueur de retour d'un lien de l'entraide, pour ne pas le confondre avec celui de la synchro privée. */
+const REDIRECT_MARK = 'entraide=1'
+
+/** Envoie le lien magique. Le lien doit être ouvert dans le MÊME navigateur (PKCE). */
+export async function signIn(email: string): Promise<void> {
+  const client = sb()
+  const address = email.trim()
+  if (!isEmail(address)) throw new NeighborsError('Adresse e-mail invalide.', 'invalid')
+  const redirect = typeof location !== 'undefined' ? `${location.origin}/?${REDIRECT_MARK}` : undefined
+  await run(client.auth.signInWithOtp({ email: address, options: { emailRedirectTo: redirect } }).then((r) => ({ data: null, error: r.error })))
+}
+
+/**
+ * À appeler UNE fois au démarrage, AVANT initSync() (synchro privée) : si l'URL est le retour d'un lien de l'entraide
+ * (`?entraide=1&code=…`), échange le code, nettoie l'URL (→ `#entraide`) pour que la synchro ne le voie pas.
+ * Ne lève jamais ; sans configuration, renvoie `{ handled: false }`.
+ */
+export async function initNeighbors(): Promise<InitNeighborsResult> {
+  const client = neighborsClient()
+  if (!client || typeof location === 'undefined') return { handled: false }
+  const params = new URLSearchParams(location.search)
+  if (params.get('entraide') !== '1') return { handled: false }
+  const code = params.get('code')
+  const urlError = params.get('error_description') ?? params.get('error')
+  let result: InitNeighborsResult
+  if (urlError) {
+    result = { handled: true, signedIn: false, error: 'Le lien de connexion a expiré ou a déjà été utilisé. Demandez-en un nouveau.' }
+  } else if (!code) {
+    result = { handled: true, signedIn: false, error: 'La connexion a échoué. Demandez un nouveau lien.' }
+  } else {
+    try {
+      const { error } = await client.auth.exchangeCodeForSession(code)
+      result = error
+        ? { handled: true, signedIn: false, error: 'Connexion impossible. Ouvrez le lien dans le même navigateur que celui où vous l’avez demandé, ou demandez-en un nouveau.' }
+        : { handled: true, signedIn: true }
+    } catch (e) {
+      result = { handled: true, signedIn: false, error: translateError(e) }
+    }
+  }
+  try {
+    history.replaceState(null, '', location.pathname + '#entraide')
+  } catch {
+    /* historique indisponible */
+  }
+  return result
+}
+
+export async function getSession(): Promise<NeighborsSession | null> {
+  if (!isNeighborsConfigured()) return null
+  try {
+    const { data } = await sb().auth.getSession()
+    const u = data.session?.user
+    return u ? { userId: u.id, email: u.email ?? null } : null
+  } catch (e) {
+    return fail(e)
+  }
+}
+
+/** Abonnement aux changements de connexion. Renvoie la fonction de désabonnement. */
+export function onSessionChange(cb: (s: NeighborsSession | null) => void): () => void {
+  const client = neighborsClient()
+  if (!client) return () => {}
+  const { data } = client.auth.onAuthStateChange((_evt, session) => cb(session?.user ? { userId: session.user.id, email: session.user.email ?? null } : null))
+  return () => data.subscription.unsubscribe()
+}
+
+export async function signOut(): Promise<void> {
+  profileCache = undefined
+  const client = neighborsClient()
+  if (!client) return
+  try {
+    await client.auth.signOut()
+  } catch {
+    // Hors ligne : on supprime quand même le jeton local.
+    try {
+      localStorage.removeItem(NEIGHBORS_STORAGE_KEY)
+    } catch {
+      /* stockage indisponible */
+    }
+  }
+}
+
+async function requireUserId(): Promise<string> {
+  const s = await getSession()
+  if (!s) throw new NeighborsError('Connectez-vous pour utiliser l’entraide.', 'auth')
+  return s.userId
+}
+
+// ---------- Profil ----------
+
+interface ProfileRow {
+  user_id: string
+  pseudo: string
+  cell_lat: number | string
+  cell_lon: number | string
+  created_at: string
+}
+const PROFILE_COLS = 'user_id, pseudo, cell_lat, cell_lon, created_at'
+
+const toProfile = (r: ProfileRow): Profile => ({
+  userId: r.user_id,
+  pseudo: r.pseudo,
+  cell: { lat: Number(r.cell_lat), lon: Number(r.cell_lon) },
+  createdAt: r.created_at,
+})
+
+let profileCache: Profile | null | undefined
+let profileCacheUser: string | undefined
+
+export async function getProfile(): Promise<Profile | null> {
+  const uid = await requireUserId()
+  const row = await run<ProfileRow>(sb().from('profiles').select(PROFILE_COLS).eq('user_id', uid).maybeSingle() as never)
+  profileCacheUser = uid
+  return (profileCache = row ? toProfile(row) : null)
+}
+
+async function myCell(): Promise<Cell | null> {
+  const uid = await requireUserId()
+  if (profileCache !== undefined && profileCacheUser === uid) return profileCache?.cell ?? null
+  return (await getProfile())?.cell ?? null
+}
+
+/** Crée ou met à jour le profil. La position est arrondie ICI (cellule de ~1 km) avant tout envoi. */
+export async function saveProfile(input: { pseudo: string; lat: number; lon: number }): Promise<Profile> {
+  const uid = await requireUserId()
+  const pseudo = validatePseudo(input.pseudo)
+  if (!isValidCoord(input.lat, input.lon)) throw new NeighborsError('Position invalide. Choisissez votre quartier.', 'invalid')
+  const cell = roundCell(input.lat, input.lon)
+  const client = sb()
+  const existing = await run<{ user_id: string }>(client.from('profiles').select('user_id').eq('user_id', uid).maybeSingle() as never)
+  const q = existing
+    ? client.from('profiles').update({ pseudo, cell_lat: cell.lat, cell_lon: cell.lon }).eq('user_id', uid).select(PROFILE_COLS).single()
+    : client.from('profiles').insert({ user_id: uid, pseudo, cell_lat: cell.lat, cell_lon: cell.lon }).select(PROFILE_COLS).single()
+  const row = await run<ProfileRow>(q as never)
+  if (!row) throw new NeighborsError('Le profil n’a pas pu être enregistré.')
+  profileCacheUser = uid
+  return (profileCache = toProfile(row))
+}
+
+// ---------- Annonces ----------
+
+interface PostRow {
+  id: string
+  author: string
+  kind: PostKind
+  title: string
+  body: string
+  species_id: string | null
+  photo_path: string | null
+  status: Post['status']
+  cell_lat: number | string
+  cell_lon: number | string
+  created_at: string
+  expires_at: string
+  profiles?: { pseudo?: string } | null
+}
+const POST_SELECT = '*, profiles(pseudo)'
+
+function toPost(r: PostRow, uid: string, from: Cell | null): Post {
+  const cell = { lat: Number(r.cell_lat), lon: Number(r.cell_lon) }
+  const km = from ? cellDistanceKm(from, cell) : null
+  return {
+    id: r.id,
+    authorId: r.author,
+    authorPseudo: r.profiles?.pseudo ?? 'Voisin',
+    mine: r.author === uid,
+    kind: r.kind,
+    title: r.title,
+    body: r.body ?? '',
+    speciesId: r.species_id,
+    photoPath: r.photo_path,
+    status: r.status,
+    cell,
+    createdAt: r.created_at,
+    expiresAt: r.expires_at,
+    distanceKm: km,
+    distanceLabel: distanceLabel(km),
+  }
+}
+
+/** Annonces ouvertes autour de mon quartier, les plus récentes d'abord. Les personnes bloquées en sont exclues par la base. */
+export async function listPosts(opts: ListPostsOptions = {}): Promise<Post[]> {
+  const uid = await requireUserId()
+  const center = await myCell()
+  if (!center) throw new NeighborsError('Créez d’abord votre profil (pseudo et quartier).', 'no_profile')
+  const radius = Math.min(L.maxRadiusKm, Math.max(1, opts.radiusKm ?? L.defaultRadiusKm))
+  const b = cellBounds(center, radius)
+  let q = sb()
+    .from('posts')
+    .select(POST_SELECT)
+    .eq('status', 'open')
+    .gte('cell_lat', b.latMin)
+    .lte('cell_lat', b.latMax)
+    .gte('cell_lon', b.lonMin)
+    .lte('cell_lon', b.lonMax)
+  if (opts.kind) q = q.eq('kind', opts.kind)
+  const rows = (await run<PostRow[]>(q.order('created_at', { ascending: false }).limit(100) as never)) ?? []
+  return rows.map((r) => toPost(r, uid, center)).filter((p) => p.distanceKm == null || p.distanceKm <= radius + 0.8)
+}
+
+/** Mes propres annonces (tous statuts, y compris masquées). */
+export async function listMyPosts(): Promise<Post[]> {
+  const uid = await requireUserId()
+  const center = await myCell()
+  const rows = (await run<PostRow[]>(sb().from('posts').select(POST_SELECT).eq('author', uid).order('created_at', { ascending: false }).limit(100) as never)) ?? []
+  return rows.map((r) => toPost(r, uid, center))
+}
+
+/** Redessine la photo (EXIF/GPS supprimés), la réduit sous 1 Mo et vérifie qu'aucune métadonnée ne subsiste. */
+async function preparePhoto(photo: Blob): Promise<Blob> {
+  let clean: Blob
+  try {
+    clean = await compressToTarget(photo, { maxSide: 1280, targetBytes: 800 * 1024 })
+  } catch (e) {
+    return fail(e)
+  }
+  if (clean.size > L.photoMaxBytes) throw new NeighborsError('La photo est trop lourde (1 Mo maximum). Essayez une autre image.', 'invalid')
+  const bytes = new Uint8Array(await clean.arrayBuffer())
+  if (jpegMetadataSegments(bytes).length > 0) throw new NeighborsError('La photo contient encore des métadonnées. Elle n’a pas été envoyée.', 'invalid')
+  return clean
+}
+
+const newId = () => (globalThis.crypto?.randomUUID?.() ?? `${Date.now().toString(16)}-${Math.random().toString(16).slice(2)}`)
+
+/** Publie une annonce. Valide, vérifie le quota du jour, nettoie la photo, l'envoie, puis crée l'annonce. */
+export async function createPost(input: NewPost): Promise<Post> {
+  const uid = await requireUserId()
+  const v = validatePost(input)
+  const center = await myCell()
+  if (!center) throw new NeighborsError('Créez d’abord votre profil (pseudo et quartier).', 'no_profile')
+  const client = sb()
+
+  // Quota du jour (heure UTC, comme la base). La base reste l'arbitre.
+  const day = new Date().toISOString().slice(0, 10)
+  const { count, error: cErr } = await client.from('posts').select('id', { count: 'exact', head: true }).eq('author', uid).gte('created_at', `${day}T00:00:00Z`)
+  if (cErr) fail(cErr)
+  if ((count ?? 0) >= L.postsPerDay) throw new NeighborsError(QUOTA_TEXT.post, 'quota')
+
+  let photoPath: string | null = null
+  if (input.photo) {
+    const clean = await preparePhoto(input.photo)
+    photoPath = `${uid}/${newId()}.jpg`
+    await run(client.storage.from(PHOTO_BUCKET).upload(photoPath, clean, { contentType: 'image/jpeg', upsert: false }) as never)
+  }
+  try {
+    const row = await run<PostRow>(
+      client
+        .from('posts')
+        .insert({ author: uid, kind: v.kind, title: v.title, body: v.body, species_id: v.speciesId, photo_path: photoPath })
+        .select(POST_SELECT)
+        .single() as never,
+    )
+    if (!row) throw new NeighborsError('L’annonce n’a pas pu être publiée.')
+    return toPost(row, uid, center)
+  } catch (e) {
+    if (photoPath) await removePhotos([photoPath]) // pas de photo orpheline
+    throw e
+  }
+}
+
+export const PHOTO_BUCKET = 'neighbors-photos'
+
+async function removePhotos(paths: string[]): Promise<void> {
+  if (!paths.length) return
+  try {
+    await sb().storage.from(PHOTO_BUCKET).remove(paths)
+  } catch {
+    /* au mieux : l'éditeur purge les fichiers orphelins (docs/ENTRAIDE.md) */
+  }
+}
+
+/** URL temporaire (1 h) d'une photo d'annonce, ou null. */
+export async function getPhotoUrl(path: string | null): Promise<string | null> {
+  if (!path) return null
+  try {
+    const { data } = await sb().storage.from(PHOTO_BUCKET).createSignedUrl(path, 3600)
+    return data?.signedUrl ?? null
+  } catch {
+    return null
+  }
+}
+
+async function setStatus(id: string, status: 'open' | 'closed'): Promise<void> {
+  const uid = await requireUserId()
+  await run(sb().from('posts').update({ status }).eq('id', id).eq('author', uid) as never)
+}
+
+/** Marque l'annonce comme terminée (donnée, échangée, résolue…). */
+export const closePost = (id: string) => setStatus(id, 'closed')
+export const reopenPost = (id: string) => setStatus(id, 'open')
+
+export async function deletePost(id: string): Promise<void> {
+  const uid = await requireUserId()
+  const client = sb()
+  const row = await run<{ photo_path: string | null }>(client.from('posts').select('photo_path').eq('id', id).eq('author', uid).maybeSingle() as never)
+  await run(client.from('posts').delete().eq('id', id).eq('author', uid) as never)
+  if (row?.photo_path) await removePhotos([row.photo_path])
+}
+
+// ---------- Réponses (questions) ----------
+
+interface ReplyRow {
+  id: string
+  post_id: string
+  author: string
+  body: string
+  created_at: string
+  profiles?: { pseudo?: string } | null
+}
+
+const toReply = (r: ReplyRow, uid: string): Reply => ({
+  id: r.id,
+  postId: r.post_id,
+  authorId: r.author,
+  authorPseudo: r.profiles?.pseudo ?? 'Voisin',
+  mine: r.author === uid,
+  body: r.body,
+  createdAt: r.created_at,
+})
+
+export async function listReplies(postId: string): Promise<Reply[]> {
+  const uid = await requireUserId()
+  const rows = (await run<ReplyRow[]>(sb().from('replies').select('*, profiles(pseudo)').eq('post_id', postId).order('created_at', { ascending: true }).limit(200) as never)) ?? []
+  return rows.map((r) => toReply(r, uid))
+}
+
+export async function addReply(postId: string, body: string): Promise<Reply> {
+  const uid = await requireUserId()
+  const text = validateText(body, 'Réponse', L.bodyMax, true)
+  const row = await run<ReplyRow>(sb().from('replies').insert({ post_id: postId, author: uid, body: text }).select('*, profiles(pseudo)').single() as never)
+  if (!row) throw new NeighborsError('La réponse n’a pas pu être publiée.')
+  return toReply(row, uid)
+}
+
+export async function deleteReply(id: string): Promise<void> {
+  await requireUserId()
+  await run(sb().from('replies').delete().eq('id', id) as never)
+}
+
+// ---------- Messages privés ----------
+
+interface ThreadRow {
+  id: string
+  user_a: string
+  user_b: string
+  post_id: string | null
+  last_message_at: string
+}
+
+async function pseudos(ids: string[]): Promise<Map<string, string>> {
+  const map = new Map<string, string>()
+  if (!ids.length) return map
+  const rows = (await run<{ user_id: string; pseudo: string }[]>(sb().from('profiles').select('user_id, pseudo').in('user_id', ids) as never)) ?? []
+  for (const r of rows) map.set(r.user_id, r.pseudo)
+  return map
+}
+
+const toThread = (r: ThreadRow, uid: string, names: Map<string, string>): Thread => {
+  const otherId = r.user_a === uid ? r.user_b : r.user_a
+  return { id: r.id, otherId, otherPseudo: names.get(otherId) ?? 'Voisin', postId: r.post_id, lastMessageAt: r.last_message_at }
+}
+
+export async function listThreads(): Promise<Thread[]> {
+  const uid = await requireUserId()
+  const rows = (await run<ThreadRow[]>(sb().from('threads').select('*').order('last_message_at', { ascending: false }).limit(100) as never)) ?? []
+  const names = await pseudos(rows.map((r) => (r.user_a === uid ? r.user_b : r.user_a)))
+  return rows.map((r) => toThread(r, uid, names))
+}
+
+/** Ouvre (ou retrouve) la conversation avec une personne. L'ordre des identifiants est imposé par la base (user_a < user_b). */
+export async function openThread(otherId: string, postId?: string | null): Promise<Thread> {
+  const uid = await requireUserId()
+  if (otherId === uid) throw new NeighborsError('Vous ne pouvez pas vous écrire à vous-même.', 'invalid')
+  const [a, b] = uid < otherId ? [uid, otherId] : [otherId, uid]
+  const client = sb()
+  let row = await run<ThreadRow>(client.from('threads').select('*').eq('user_a', a).eq('user_b', b).maybeSingle() as never)
+  if (!row) row = await run<ThreadRow>(client.from('threads').insert({ user_a: a, user_b: b, post_id: postId ?? null }).select('*').single() as never)
+  if (!row) throw new NeighborsError('La conversation n’a pas pu être ouverte.')
+  return toThread(row, uid, await pseudos([otherId]))
+}
+
+interface MessageRow {
+  id: string
+  thread_id: string
+  sender: string
+  body: string
+  created_at: string
+}
+const toMessage = (r: MessageRow, uid: string): Message => ({ id: r.id, threadId: r.thread_id, mine: r.sender === uid, body: r.body, createdAt: r.created_at })
+
+export async function listMessages(threadId: string): Promise<Message[]> {
+  const uid = await requireUserId()
+  const rows = (await run<MessageRow[]>(sb().from('messages').select('*').eq('thread_id', threadId).order('created_at', { ascending: true }).limit(500) as never)) ?? []
+  return rows.map((r) => toMessage(r, uid))
+}
+
+export async function sendMessage(threadId: string, body: string): Promise<Message> {
+  const uid = await requireUserId()
+  const text = validateMessage(body)
+  const row = await run<MessageRow>(sb().from('messages').insert({ thread_id: threadId, sender: uid, body: text }).select('*').single() as never)
+  if (!row) throw new NeighborsError('Le message n’a pas pu être envoyé.')
+  return toMessage(row, uid)
+}
+
+// ---------- Modération ----------
+
+/** Signale un contenu. À 3 signalements de personnes distinctes, une annonce ou une réponse est masquée automatiquement. */
+export async function report(target: ReportTarget, targetId: string, reason: ReportReason, details?: string): Promise<void> {
+  const uid = await requireUserId()
+  if (!(reason in REPORT_REASONS)) throw new NeighborsError('Motif de signalement inconnu.', 'invalid')
+  const d = validateText(details ?? '', 'Précisions', L.detailsMax, false)
+  await run(sb().from('reports').insert({ reporter: uid, target_kind: target, target_id: targetId, reason, details: d || null }) as never)
+}
+
+/** Bloque une personne : plus aucune annonce, réponse ni message dans les deux sens. */
+export async function blockUser(userId: string): Promise<void> {
+  const uid = await requireUserId()
+  if (userId === uid) throw new NeighborsError('Vous ne pouvez pas vous bloquer vous-même.', 'invalid')
+  await run(sb().from('blocks').insert({ blocker: uid, blocked: userId }) as never)
+}
+
+export async function unblockUser(userId: string): Promise<void> {
+  const uid = await requireUserId()
+  await run(sb().from('blocks').delete().eq('blocker', uid).eq('blocked', userId) as never)
+}
+
+export async function listBlocks(): Promise<BlockedUser[]> {
+  const uid = await requireUserId()
+  const rows = (await run<{ blocked: string; blocked_pseudo: string | null }[]>(sb().from('blocks').select('blocked, blocked_pseudo').eq('blocker', uid) as never)) ?? []
+  return rows.map((r) => ({ userId: r.blocked, pseudo: r.blocked_pseudo }))
+}
+
+// ---------- Compte ----------
+
+/**
+ * Supprime définitivement le compte de l'entraide : photos, puis (en cascade côté base) profil, annonces, réponses,
+ * conversations, messages, signalements, blocages. Déconnecte ensuite l'appareil.
+ */
+export async function deleteMyAccount(): Promise<void> {
+  const uid = await requireUserId()
+  const client = sb()
+  // Les fichiers doivent partir par l'API Storage (effacer les lignes SQL laisserait les fichiers).
+  try {
+    const { data } = await client.storage.from(PHOTO_BUCKET).list(uid, { limit: 1000 })
+    const paths = (data ?? []).map((f) => `${uid}/${f.name}`)
+    if (paths.length) await client.storage.from(PHOTO_BUCKET).remove(paths)
+  } catch (e) {
+    throw new NeighborsError(`Vos photos n’ont pas pu être supprimées, le compte est conservé. ${translateError(e)}`)
+  }
+  await run(client.rpc('delete_my_account') as never)
+  profileCache = undefined
+  await signOut()
+}
