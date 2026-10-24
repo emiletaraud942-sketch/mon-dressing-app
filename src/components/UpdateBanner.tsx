@@ -41,10 +41,12 @@ export function UpdateBanner() {
   if (needRefresh) {
     return (
       <div className="alert info banner" role="status">
-        <span>Nouvelle version disponible.</span>
-        <span className="row" style={{ gap: 6 }}>
+        <span>
+          <strong>Mise à jour disponible.</strong> L’appli se recharge en quelques secondes.
+        </span>
+        <span className="row">
           <button className="btn small primary" onClick={() => void updateServiceWorker(true)}>
-            Mettre à jour
+            Installer
           </button>
           <button className="btn small" onClick={() => setNeedRefresh(false)}>
             Plus tard
@@ -56,7 +58,7 @@ export function UpdateBanner() {
   if (showOffline) {
     return (
       <div className="alert info banner" role="status">
-        <span>Prêt à fonctionner hors ligne.</span>
+        <span>L’appli marche maintenant sans internet.</span>
         <button className="btn small" onClick={() => setOfflineReady(false)}>
           OK
         </button>

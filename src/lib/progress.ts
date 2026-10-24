@@ -2,10 +2,10 @@ import type { Garden, Plant, Species } from '../types'
 
 // Avancement de la modélisation du jardin. Module pur : rien n'est jamais bloqué, ce ne sont que des suggestions.
 
-export type StepId = 'adresse' | 'donnees' | 'premier-arbre' | 'cinq-plantes' | 'photo' | 'sol' | 'vue-3d'
+export type StepId = 'adresse' | 'donnees' | 'premier-arbre' | 'cinq-plantes' | 'sol'
 
 /** Ce que fait le bouton d'une étape (l'interface décide de l'écran à ouvrir). */
-export type StepActionKind = 'donnees' | 'placer' | 'photo' | 'sol' | '3d'
+export type StepActionKind = 'donnees' | 'placer' | 'sol'
 
 export interface ProgressStep {
   id: StepId
@@ -19,6 +19,9 @@ export interface Progress {
   steps: ProgressStep[]
   /** 0 à 100. */
   percent: number
+  /** Étapes faites et nombre total (« 3 étapes sur 5 »). */
+  doneCount: number
+  total: number
   /** Première étape à faire, s'il en reste. */
   next?: ProgressStep
   /** Plantes au statut « en place ». */
@@ -29,10 +32,12 @@ export interface Progress {
 
 export interface ProgressOpts {
   speciesById: Record<string, Pick<Species, 'strate'> | undefined>
-  /** Vue 3D déjà ouverte pour ce jardin (mémorisé par l'interface). */
-  opened3d?: boolean
   openedEntretien?: boolean
 }
+
+/** « Premiers pas » : les 3 étapes qui demandent un geste de l'utilisateur (les deux autres se font toutes seules). */
+export const FIRST_STEP_IDS: StepId[] = ['premier-arbre', 'cinq-plantes', 'sol']
+export const firstSteps = (p: Progress): ProgressStep[] => FIRST_STEP_IDS.map((id) => p.steps.find((s) => s.id === id)!).filter(Boolean)
 
 const TREE_STRATES = new Set(['canopee', 'arbre-bas', 'arbuste'])
 export const PLANTS_GOAL = 5
@@ -45,54 +50,42 @@ export function computeProgress(garden: Garden, plants: Plant[], opts: ProgressO
   const placed = mine.filter((p) => p.status === 'en-place')
   const hasTree = placed.some((p) => TREE_STRATES.has(opts.speciesById[p.speciesId]?.strate ?? ''))
   const steps: ProgressStep[] = [
-    { id: 'adresse', label: 'Adresse trouvée', done: true, hint: 'Votre jardin est localisé.' },
+    { id: 'adresse', label: 'Adresse trouvée', done: true, hint: 'Votre jardin est repéré sur la carte.' },
     {
       id: 'donnees',
-      label: 'Parcelle et bâtiments récupérés',
+      label: 'Terrain et maisons voisines récupérés',
       done: !!garden.parcel?.length && garden.buildings !== undefined,
-      hint: "Ces données de l'IGN cadrent la carte et servent à calculer l'ombre.",
+      hint: 'Ils cadrent la carte et servent à calculer l’ombre.',
       action: { kind: 'donnees', label: 'Réessayer' },
     },
     {
       id: 'premier-arbre',
       label: 'Premier arbre ou arbuste placé',
       done: hasTree,
-      hint: "Les grands végétaux donnent de l'ombre : placez-les en premier.",
-      action: { kind: 'placer', label: 'Placer' },
+      hint: 'Les grands arbres font de l’ombre : placez-les d’abord.',
+      action: { kind: 'placer', label: 'Ajouter' },
     },
     {
       id: 'cinq-plantes',
       label: `${PLANTS_GOAL} plantes placées`,
       done: placed.length >= PLANTS_GOAL,
-      hint: `${Math.min(placed.length, PLANTS_GOAL)} sur ${PLANTS_GOAL}. Touchez la carte à l'endroit exact de chaque plante.`,
-      action: { kind: 'placer', label: 'Placer' },
-    },
-    {
-      id: 'photo',
-      label: 'Une photo ajoutée',
-      done: mine.some((p) => p.photos.length > 0),
-      hint: "Une photo aide à suivre la plante d'une saison à l'autre.",
-      action: { kind: 'photo', label: 'Photo' },
+      hint: `${Math.min(placed.length, PLANTS_GOAL)} sur ${PLANTS_GOAL}. Touchez la carte là où se trouve chaque plante.`,
+      action: { kind: 'placer', label: 'Ajouter' },
     },
     {
       id: 'sol',
-      label: 'Nature du sol renseignée',
+      label: 'Nature du sol choisie',
       done: !!garden.sol,
-      hint: 'Argileux, sableux… : les conseils de plantation en tiennent compte.',
-      action: { kind: 'sol', label: 'Sol' },
-    },
-    {
-      id: 'vue-3d',
-      label: 'Vue 3D ouverte',
-      done: !!opts.opened3d,
-      hint: "Voyez votre jardin en volume, avec l'ombre du soleil.",
-      action: { kind: '3d', label: 'Ouvrir' },
+      hint: 'Argileux, sableux… : nos conseils en tiennent compte.',
+      action: { kind: 'sol', label: 'Choisir' },
     },
   ]
-  const done = steps.filter((s) => s.done).length
+  const doneCount = steps.filter((s) => s.done).length
   return {
     steps,
-    percent: Math.round((done / steps.length) * 100),
+    percent: Math.round((doneCount / steps.length) * 100),
+    doneCount,
+    total: steps.length,
     next: steps.find((s) => !s.done),
     placedCount: placed.length,
     openedEntretien: !!opts.openedEntretien,

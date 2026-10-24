@@ -26,3 +26,33 @@ describe('doneTaskLabel', () => {
     expect(doneTaskLabel('', lookup)).toBe('Tâche')
   })
 })
+
+import { doneOnLabel } from './taskLabel'
+import { rainWord, weatherSentences } from './weatherText'
+
+describe('doneOnLabel', () => {
+  const now = new Date('2026-10-24T10:00:00')
+  it('date en toutes lettres', () => {
+    expect(doneOnLabel('2026-10-21T09:00:00', now)).toBe('Fait le 21 octobre')
+  })
+  it('autre année : année ajoutée', () => {
+    expect(doneOnLabel('2025-12-02T09:00:00', now)).toBe('Fait le 2 décembre 2025')
+  })
+  it('date illisible', () => expect(doneOnLabel('x', now)).toBe(''))
+})
+
+describe('météo en clair', () => {
+  it('sol sec sans pluie', () => {
+    const s = weatherSentences({ rain7: 0, et07: 20, deficitMm: 20, forecastRain3: 0 })
+    expect(s[0]).toMatch(/arrosez/)
+    expect(s[1]).toMatch(/Pas de pluie/)
+  })
+  it('sol humide, aucun chiffre', () => {
+    const s = weatherSentences({ rain7: 30, et07: 10, deficitMm: 0, forecastRain3: 6 }).join(' ')
+    expect(s).toMatch(/assez plu/)
+    expect(s).not.toMatch(/\d+ mm/)
+  })
+  it('mots de pluie', () => {
+    expect([rainWord(0), rainWord(1), rainWord(8)]).toEqual(['Sec', 'Averses', 'Pluie'])
+  })
+})

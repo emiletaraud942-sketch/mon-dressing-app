@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Tabs, TabPanel } from '../../components/Tabs'
 import { getProfile, getSession, onSessionChange } from '../../lib/neighbors/api'
-import { parseRadius, type KindFilter } from '../../lib/neighbors/logic'
-import type { NeighborsSession, Post, Profile, Thread } from '../../lib/neighbors/types'
-import { useConsents } from '../../lib/consent'
+import { neighborhoodText, parseRadius, type KindFilter } from '../../lib/neighbors/logic'
+import type { NeighborsSession, Post, PostKind, Profile, Thread } from '../../lib/neighbors/types'
+import { grantConsent, useConsents } from '../../lib/consent'
 import type { Garden } from '../../types'
-import { ConsentDialog } from '../legal/ConsentDialog'
-import { ErrorBox, Spinner } from './common'
+import { LegalLink } from '../legal/LegalLinks'
+import '../../styles/novice-pages.css'
+import { ErrorBox, KindBadge, Spinner } from './common'
 import { Feed } from './Feed'
 import { errorText, useLoad, useOnline } from './hooks'
 import { ThreadList, ThreadView } from './Messages'
@@ -22,40 +23,69 @@ type Section = 'fil' | 'messages' | 'mes' | 'profil'
 type View = { k: 'tabs' } | { k: 'new' } | { k: 'post'; post: Post } | { k: 'thread'; thread: Thread; postTitle?: string }
 
 const SECTIONS: { id: Section; label: string }[] = [
-  { id: 'fil', label: 'Fil' },
+  { id: 'fil', label: 'Annonces' },
   { id: 'messages', label: 'Messages' },
   { id: 'mes', label: 'Mes annonces' },
   { id: 'profil', label: 'Profil' },
 ]
 
-/** Écran « Entraide entre voisins ». Aucune requête ne part avant l'accord de l'utilisateur. */
+const EXAMPLES: { kind: PostKind; title: string; who: string }[] = [
+  { kind: 'don', title: 'Boutures de menthe à donner', who: 'Marie · dans votre quartier' },
+  { kind: 'pret', title: 'Je prête mon sécateur et ma bêche', who: 'Paul · à ~2 km' },
+  { kind: 'question', title: 'Quelle plante pour un mur à l’ombre ?', who: 'Annie · à ~3 km' },
+]
+
+/** Écran « Entraide ». Aucune requête ne part avant l'accord : un seul écran explique et demande l'autorisation. */
 export function NeighborsPage({ garden }: { garden: Garden }) {
   const { voisins } = useConsents()
-  const [asking, setAsking] = useState(false)
   return (
-    <div className="page nb-page">
+    <div className="page nb-page np-page">
       <header className="nb-head">
         <h1>Entraide entre voisins</h1>
         <p className="muted" style={{ margin: 0 }}>
-          Dons, échanges, prêts et questions entre jardiniers du quartier. Facultatif et gratuit.
+          Donnez, échangez, prêtez ou posez une question à des jardiniers près de chez vous. C’est gratuit.
         </p>
       </header>
       {voisins ? (
         <Connected garden={garden} />
       ) : (
-        <section className="card stack">
-          <h2>Avant de commencer</h2>
-          <p style={{ margin: 0 }}>
-            Pour échanger, il faut un compte (e-mail, sans mot de passe) et un pseudo. Votre position est arrondie à ~1 km : jamais votre adresse. Rien n’est envoyé tant que vous n’avez pas accepté.
-          </p>
-          <div className="row">
-            <button className="btn primary" onClick={() => setAsking(true)}>
-              Continuer
-            </button>
-          </div>
-        </section>
+        <>
+          <section className="card stack" aria-label="Exemples d’annonces">
+            <h2>Voici à quoi ça ressemble</h2>
+            <p className="small muted" style={{ margin: 0 }}>Ce sont des exemples, pas de vraies annonces.</p>
+            {EXAMPLES.map((e) => (
+              <div key={e.title} className="np-example">
+                <span>
+                  <KindBadge kind={e.kind} />
+                </span>
+                <strong>{e.title}</strong>
+                <span className="small muted">{e.who}</span>
+              </div>
+            ))}
+          </section>
+          <section className="card stack" aria-label="Avant de commencer">
+            <h2>Avant de commencer</h2>
+            <ul className="nb-rules">
+              <li>Il faut une adresse e-mail et un pseudo. Pas de mot de passe.</li>
+              <li>Les voisins voient votre pseudo et votre quartier, jamais votre adresse.</li>
+              <li>Votre quartier est arrondi : environ 1 km autour de chez vous.</li>
+              <li>Vos annonces et messages sont gardés sur un serveur en Europe. Les annonces disparaissent après 60 jours.</li>
+              <li>Vous pouvez tout supprimer, ou retirer votre autorisation, à tout moment.</li>
+            </ul>
+            <p className="small" style={{ margin: 0 }}>
+              Détails : <LegalLink id="confidentialite" label="politique de confidentialité" />.
+            </p>
+            <p style={{ margin: 0 }}>
+              <strong>Rien n’est envoyé avant votre accord.</strong>
+            </p>
+            <div className="row">
+              <button className="btn primary" onClick={() => grantConsent('voisins')}>
+                J’accepte et je continue
+              </button>
+            </div>
+          </section>
+        </>
       )}
-      {asking && <ConsentDialog id="voisins" onAccept={() => setAsking(false)} onRefuse={() => setAsking(false)} />}
     </div>
   )
 }
@@ -80,7 +110,7 @@ function Connected({ garden }: { garden: Garden }) {
   const userId = session?.userId
   const profile = useLoad(getProfile, userId ?? '', !!userId)
 
-  if (session === undefined) return <Spinner label="Connexion…" />
+  if (session === undefined) return <Spinner label="Connexion en cours…" />
   if (!session) {
     return (
       <>
@@ -111,12 +141,14 @@ function Main({ profile, email, garden, online, onProfile }: { profile: Profile;
     <div className="stack">
       {!online && (
         <p className="alert small" role="status" style={{ margin: 0 }}>
-          Vous êtes hors ligne. Les annonces et messages se mettront à jour au retour du réseau.
+          Pas de réseau. Les annonces se mettront à jour au retour du réseau.
         </p>
       )}
       {view.k === 'new' && (
         <PostForm
           online={online}
+          pseudo={profile.pseudo}
+          where={neighborhoodText(profile.cell, garden)}
           onCancel={toTabs}
           onPublished={() => {
             setSection('fil')
@@ -138,7 +170,7 @@ function Main({ profile, email, garden, online, onProfile }: { profile: Profile;
       {view.k === 'thread' && <ThreadView thread={view.thread} postTitle={view.postTitle} online={online} onBack={toTabs} />}
       {view.k === 'tabs' && (
         <>
-          <Tabs tabs={SECTIONS} value={section} onChange={setSection} label="Sections de l’entraide" idPrefix="nb" />
+          <Tabs tabs={SECTIONS} value={section} onChange={setSection} label="Parties de l’entraide" idPrefix="nb" />
           <TabPanel idPrefix="nb" active={section}>
             {section === 'fil' && (
               <Feed kind={kind} radius={radius} online={online} onKind={setKind} onRadius={changeRadius} onOpen={(p) => setView({ k: 'post', post: p })} onNew={() => setView({ k: 'new' })} />

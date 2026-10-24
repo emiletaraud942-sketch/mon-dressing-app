@@ -1,3 +1,4 @@
+import { firstSteps } from '../lib/progress'
 import { setGuide, useUi } from '../lib/ui'
 import { Icon } from './Icon'
 import { StepButton } from './StepButton'
@@ -12,14 +13,16 @@ export function FirstSteps({ garden }: { garden: Garden }) {
   const { guide } = useUi()
   const progress = useProgress(garden)
   if (guide.stepsHidden) return null
-  const done = progress.steps.filter((s) => s.done).length
+  const steps = firstSteps(progress)
+  const done = steps.filter((s) => s.done).length
+  const nextId = steps.find((s) => !s.done)?.id
   const open = guide.stepsOpen
   return (
     <section className="firststeps" aria-label="Premiers pas">
       <button className="guide-toggle" aria-expanded={open} aria-controls="firststeps-list" onClick={() => setGuide({ stepsOpen: !open })}>
-        <strong>Premiers pas</strong>
+        <strong>Premiers pas en 3 étapes</strong>
         <span className="muted small">
-          {done} sur {progress.steps.length}
+          {done} sur {steps.length}
         </span>
         <span className={'chev' + (open ? ' up' : '')} aria-hidden>
           <Icon name="chevron" size={18} />
@@ -28,7 +31,7 @@ export function FirstSteps({ garden }: { garden: Garden }) {
       {open && (
         <>
           <ul className="steps-list" id="firststeps-list">
-            {progress.steps.map((s) => (
+            {steps.map((s) => (
               <li key={s.id} className={s.done ? 'done' : undefined}>
                 <span className="check" aria-hidden>
                   {s.done ? '✓' : ''}
@@ -38,9 +41,9 @@ export function FirstSteps({ garden }: { garden: Garden }) {
                     {s.label}
                     <span className="sr-only">{s.done ? ' : fait' : ' : à faire'}</span>
                   </span>
-                  {s.id === progress.next?.id && <span className="muted small">{s.hint}</span>}
+                  {s.id === nextId && <span className="muted small">{s.hint}</span>}
                 </span>
-                <StepButton step={s} garden={garden} />
+                <StepButton step={s} />
               </li>
             ))}
           </ul>

@@ -1,8 +1,9 @@
 import { SPECIES_BY_ID } from '../../data/species'
 import { isoDate } from '../../lib/dates'
-import { addPlant, removePlant, updatePlant } from '../../lib/store'
+import { addPlant, getState, removePlant, updatePlant } from '../../lib/store'
 import { dismissToast, showToast } from '../../lib/toast'
 import { getUi, setUi, type Tab } from '../../lib/ui'
+import { plantName } from '../plants/PlantPanel'
 import { uid } from '../../lib/geo'
 import type { Garden, XY } from '../../types'
 
@@ -32,16 +33,27 @@ export function placePlant(garden: Garden, speciesId: string, position: XY, stat
     setUi({ placingSeries: { count }, pendingPhotos: undefined, selectedPlantId: undefined })
     // Un seul message à la fois pour la série : le précédent est remplacé (sa plante reste placée).
     if (lastSeriesToast !== undefined) dismissToast(lastSeriesToast)
-    lastSeriesToast = showToast({ message: `${name} placé (${count} dans cette série).`, actionLabel: 'Annuler', onAction: () => removePlant(id), durationMs: 6000 })
+    lastSeriesToast = showToast({ message: `Plante placée : ${name} (${count} de suite).`, actionLabel: 'Annuler', onAction: () => removePlant(id) })
     return
   }
   setUi({ placingSpeciesId: undefined, placingCustomName: undefined, pendingPhotos: undefined, selectedPlantId: id, ...(opts.tab ? { tab: opts.tab } : {}) })
   if (status === 'projet') {
     showToast({
-      message: `Ajoutée en projet : ${name}.`,
-      actionLabel: 'Marquer comme plantée',
+      message: `« ${name} » est prévue. Quand vous l’aurez plantée, touchez « C’est planté ».`,
+      actionLabel: 'C’est planté',
       onAction: () => updatePlant(id, { status: 'en-place' }),
-      durationMs: 10000,
     })
   }
+}
+
+/** « Déplacer cette plante » : la plante prend la position touchée ; un message permet de la remettre où elle était. */
+export function movePlant(plantId: string, position: XY) {
+  const before = getState().plants.find((p) => p.id === plantId)?.position
+  setUi({ movingPlantId: undefined, selectedPlantId: plantId })
+  if (!before) return
+  const next = { x: Math.round(position.x * 100) / 100, y: Math.round(position.y * 100) / 100 }
+  updatePlant(plantId, { position: next })
+  const plant = getState().plants.find((p) => p.id === plantId)
+  const name = plant ? plantName(plant) : 'Plante'
+  showToast({ message: `« ${name} » déplacée.`, actionLabel: 'Annuler', onAction: () => updatePlant(plantId, { position: before }) })
 }

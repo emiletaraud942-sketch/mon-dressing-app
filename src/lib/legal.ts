@@ -34,6 +34,15 @@ export function getMissingFields(fields: Record<string, string> = LEGAL_FIELDS):
     .map(([k]) => k)
 }
 
+/** Vrai quand tous les champs de l'éditeur sont remplis : le texte n'a plus rien de provisoire à montrer. */
+export const isLegalReady = (fields: Record<string, string> = LEGAL_FIELDS) => getMissingFields(fields).length === 0
+
+/** Ce que l'utilisateur lit à la place d'un champ vide : une phrase neutre, jamais « [à compléter] ». */
+export const PENDING_FIELD_TEXT = 'information à venir'
+
+/** Texte d'un document tel qu'affiché : les champs vides deviennent « information à venir ». */
+export const legalText = (text: string): string => text.split(TO_COMPLETE).join(PENDING_FIELD_TEXT)
+
 // ---------- Structure des documents ----------
 export type Block = { t: 'p'; text: string } | { t: 'ul'; items: string[] }
 export interface LegalSection {
@@ -381,18 +390,17 @@ export const CONSENT_TEXT: Record<'plantnet' | 'sync' | 'voisins', ConsentText> 
   plantnet: {
     titre: 'Envoyer la photo à Pl@ntNet ?',
     paragraphes: [
-      'Votre photo sera envoyée à Pl@ntNet (service d’identification, France/Europe) via notre serveur. Elle est ré-encodée, sans position GPS. Elle n’est pas conservée par PermaJardin.',
-      `Destinataires : ${(idf?.destinataires ?? []).join(' ; ')}.`,
-      'Vous pouvez retirer ce consentement à tout moment dans Réglages > Vie privée.',
+      'Votre photo part vers Pl@ntNet, un service d’identification européen. Elle est ré-encodée, sans position GPS, et n’est pas conservée par PermaJardin.',
+      'Vous pourrez retirer votre autorisation dans Réglages, rubrique « Ce que j’ai autorisé ».',
     ],
-    accepter: 'Accepter et identifier',
+    accepter: 'Oui, identifier la plante',
   },
   sync: {
     titre: 'Enregistrer vos données en ligne ?',
     paragraphes: [
       'Vos jardins, plantes et tâches (sans les photos) seront enregistrés sur un serveur (Supabase, UE) lié à votre adresse e-mail, pour les retrouver sur un autre appareil.',
       `Destinataire : ${(compte?.destinataires ?? []).join(' ; ')}.`,
-      'Vous pouvez retirer ce consentement et supprimer vos données en ligne à tout moment dans Réglages.',
+      'Vous pouvez retirer votre autorisation et supprimer vos données en ligne à tout moment dans Réglages.',
     ],
     accepter: 'Accepter et continuer',
   },
@@ -401,7 +409,7 @@ export const CONSENT_TEXT: Record<'plantnet' | 'sync' | 'voisins', ConsentText> 
     paragraphes: [
       'Votre adresse e-mail (pour le lien de connexion), votre pseudo, votre quartier arrondi à ~1 km, vos annonces, photos, réponses et messages privés seront enregistrés sur un serveur dédié (Supabase, UE). Votre adresse et votre position exacte ne sont jamais envoyées.',
       'Votre pseudo, votre quartier, vos annonces et vos réponses sont visibles des autres membres. Vos messages ne sont lus que par votre correspondant. Les annonces disparaissent après 60 jours.',
-      'Vous pouvez retirer ce consentement dans Réglages > Vie privée, et supprimer votre compte et vos annonces à tout moment dans l’entraide.',
+      'Vous pouvez retirer votre autorisation dans Réglages, et supprimer votre compte et vos annonces à tout moment dans l’entraide.',
     ],
     accepter: 'Accepter et continuer',
   },

@@ -196,6 +196,35 @@ describe('historique', () => {
     expect(ui.getUi().placingSeries).toBeUndefined()
     expect(ui.getUi().placingSpeciesId).toBeUndefined()
   })
+
+  it('« Déplacer cette plante » ouvre la carte, remplace un placement et s’arrête avec stopPlacing', async () => {
+    const { ui } = await load('#plantes')
+    ui.startPlacing('pommier')
+    ui.startMoving('p1')
+    expect(ui.getUi().tab).toBe('carte')
+    expect(ui.getUi().movingPlantId).toBe('p1')
+    expect(ui.getUi().placingSpeciesId).toBeUndefined()
+    ui.stopPlacing()
+    expect(ui.getUi().movingPlantId).toBeUndefined()
+    ui.startMoving('p1')
+    ui.setUi({ tab: 'plantes' })
+    expect(ui.getUi().movingPlantId).toBeUndefined()
+  })
+
+  it('une nouvelle plante à placer annule un déplacement en cours', async () => {
+    const { ui } = await load('')
+    ui.startMoving('p1')
+    ui.startPlacing('pommier')
+    expect(ui.getUi().movingPlantId).toBeUndefined()
+    expect(ui.getUi().placingSpeciesId).toBe('pommier')
+  })
+
+  it('les écrans portent les noms du lexique', async () => {
+    const { ui } = await load('')
+    expect(ui.TAB_LABEL['3d']).toBe('Vue 3D')
+    expect(ui.TAB_LABEL.planter).toBe('Où planter ?')
+    expect(ui.TAB_LABEL.voisins).toBe('Entraide')
+  })
 })
 
 describe('modes', () => {

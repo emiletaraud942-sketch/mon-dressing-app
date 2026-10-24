@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { deleteMyAccount, listBlocks, signOut, unblockUser } from '../../lib/neighbors/api'
-import { CONDUCT_RULES, describeCell } from '../../lib/neighbors/logic'
+import { CONDUCT_RULES, neighborhoodText } from '../../lib/neighbors/logic'
 import type { Profile } from '../../lib/neighbors/types'
 import { showToast } from '../../lib/toast'
 import type { Garden } from '../../types'
@@ -42,13 +42,13 @@ export function ProfileTab({ profile, email, garden, online, onSaved }: { profil
           </dd>
           <dt>Quartier</dt>
           <dd>
-            {describeCell(profile.cell)} <span className="small muted">(~1 km)</span>
+            {neighborhoodText(profile.cell, garden)} <span className="small muted">(environ 1 km autour)</span>
           </dd>
           {email && (
             <>
               <dt>E-mail</dt>
               <dd>
-                {email} <span className="small muted">(jamais montré)</span>
+                {email} <span className="small muted">(jamais montrée)</span>
               </dd>
             </>
           )}
@@ -74,12 +74,12 @@ export function ProfileTab({ profile, email, garden, online, onSaved }: { profil
         {signOutError && <ErrorBox message={signOutError} />}
       </section>
 
-      <section className="card stack" aria-label="Personnes bloquées">
-        <h3 style={{ margin: 0 }}>Personnes bloquées</h3>
+      <section className="card stack" aria-label="Personnes que vous ne voyez plus">
+        <h3 style={{ margin: 0 }}>Personnes que vous ne voyez plus</h3>
         {blocks.error && <ErrorBox message={blocks.error} onRetry={blocks.reload} />}
         {unblockError && <ErrorBox message={unblockError} />}
         {blocks.loading && !blocks.data && <Spinner label="Chargement…" />}
-        {blocks.data && blocked.length === 0 && <p className="muted" style={{ margin: 0 }}>Personne n’est bloqué.</p>}
+        {blocks.data && blocked.length === 0 && <p className="muted" style={{ margin: 0 }}>Vous voyez tout le monde.</p>}
         <ul className="list">
           {blocked.map((b) => (
             <li key={b.userId} className="row" style={{ justifyContent: 'space-between' }}>
@@ -97,7 +97,7 @@ export function ProfileTab({ profile, email, garden, online, onSaved }: { profil
                   }
                 }}
               >
-                Débloquer
+                Revoir cette personne
               </button>
             </li>
           ))}
@@ -112,16 +112,16 @@ export function ProfileTab({ profile, email, garden, online, onSaved }: { profil
           ))}
         </ul>
         <p className="small muted" style={{ margin: 0 }}>
-          Pour retirer votre accord à l’entraide : Réglages, Vie privée.
+          Pour retirer votre autorisation : Réglages, Vie privée.
         </p>
       </section>
 
       <section className="card stack" aria-label="Supprimer mon compte">
         <h3 style={{ margin: 0 }}>Supprimer mon compte</h3>
-        <p style={{ margin: 0 }}>Efface votre profil, vos annonces et photos, vos réponses et vos messages. Vos données de jardin sur cet appareil ne changent pas.</p>
+        <p style={{ margin: 0 }}>Efface votre profil, vos annonces, vos photos et vos messages. Votre jardin sur cet appareil ne change pas.</p>
         <div className="row">
           <button className="btn danger" onClick={() => setDeleting(true)} disabled={!online}>
-            Supprimer mon compte et mes annonces
+            Supprimer mon compte
           </button>
         </div>
       </section>
@@ -138,7 +138,7 @@ export function ProfileTab({ profile, email, garden, online, onSaved }: { profil
           }}
         >
           <p style={{ margin: 0 }}>
-            Cette action est <strong>définitive</strong> : profil, annonces, photos, réponses, conversations et blocages sont effacés sur le serveur. Vous serez déconnecté.
+            Cette action est <strong>définitive</strong>. Profil, annonces, photos et messages sont effacés. Vous serez déconnecté.
           </p>
         </Confirm>
       )}

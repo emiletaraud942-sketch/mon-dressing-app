@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Modal } from '../../components/Modal'
+import '../../styles/novice-pages.css'
 import { SpeciesPicker } from '../../components/SpeciesPicker'
 import { SPECIES_BY_ID } from '../../data/species'
 import { createPost } from '../../lib/neighbors/api'
@@ -17,14 +17,14 @@ const HINTS: Record<PostKind, { title: string; body: string }> = {
   question: { title: 'Ex. : quelle plante pour un mur à l’ombre ?', body: 'Décrivez le lieu : exposition, sol, place.' },
 }
 
-export function PostForm({ online, onPublished, onCancel }: { online: boolean; onPublished: (p: Post) => void; onCancel: () => void }) {
+export function PostForm({ online, pseudo, where, onPublished, onCancel }: { online: boolean; pseudo?: string; where?: string; onPublished: (p: Post) => void; onCancel: () => void }) {
   const [kind, setKind] = useState<PostKind>('don')
   const [title, setTitle] = useState('')
   const [body, setBody] = useState('')
   const [speciesId, setSpeciesId] = useState<string>()
   const [photo, setPhoto] = useState<File>()
   const [picking, setPicking] = useState(false)
-  const [rules, setRules] = useState(false)
+  const [step, setStep] = useState<'edit' | 'recap'>('edit')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string>()
 
@@ -33,11 +33,11 @@ export function PostForm({ online, onPublished, onCancel }: { online: boolean; o
   const species = speciesId ? SPECIES_BY_ID[speciesId] : undefined
 
   async function publish() {
-    setRules(false)
     setBusy(true)
     setError(undefined)
     try {
       const post = await createPost({ kind, title, body, speciesId, photo })
+      acceptConduct()
       showToast({ message: 'Annonce publiée.' })
       onPublished(post)
     } catch (e) {
@@ -45,7 +45,69 @@ export function PostForm({ online, onPublished, onCancel }: { online: boolean; o
       setBusy(false)
     }
   }
-  const submit = () => (conductAccepted() ? void publish() : setRules(true))
+
+  if (step === 'recap') {
+    return (
+      <section className="card stack" aria-label="Récapitulatif">
+        <h2>Vérifiez votre annonce</h2>
+        <dl className="np-recap">
+          <dt>Je veux</dt>
+          <dd>{POST_KIND_LABELS[kind]}</dd>
+          <dt>Titre</dt>
+          <dd>
+            <bdi>{title.trim()}</bdi>
+          </dd>
+          {body.trim() && (
+            <>
+              <dt>Détails</dt>
+              <dd>{body.trim()}</dd>
+            </>
+          )}
+          {species && (
+            <>
+              <dt>Plante</dt>
+              <dd>{species.nomCommun}</dd>
+            </>
+          )}
+          {previewUrl && (
+            <>
+              <dt>Photo</dt>
+              <dd>
+                <img className="photo-thumb" src={previewUrl} alt="Photo choisie" />
+              </dd>
+            </>
+          )}
+          <dt>Vu par vos voisins</dt>
+          <dd>
+            {pseudo ? <bdi>{pseudo}</bdi> : 'Votre pseudo'}
+            {where ? `, ${where}` : ''}
+          </dd>
+          <dt>Visible pendant</dt>
+          <dd>{NEIGHBORS_LIMITS.postLifetimeDays} jours</dd>
+        </dl>
+        {!conductAccepted() && (
+          <div className="stack">
+            <strong>En publiant, vous acceptez ces règles :</strong>
+            <ul className="nb-rules">
+              {CONDUCT_RULES.map((r) => (
+                <li key={r}>{r}</li>
+              ))}
+            </ul>
+          </div>
+        )}
+        {error && <ErrorBox message={error} />}
+        {!online && <p className="small warn-text" style={{ margin: 0 }}>Pas de réseau : reconnectez-vous pour publier.</p>}
+        <div className="row">
+          <button className="btn primary" onClick={() => void publish()} disabled={busy || !online}>
+            {busy && <span className="spinner" />} Publier maintenant
+          </button>
+          <button className="btn" onClick={() => setStep('edit')} disabled={busy}>
+            Modifier
+          </button>
+        </div>
+      </section>
+    )
+  }
 
   return (
     <>
@@ -53,12 +115,12 @@ export function PostForm({ online, onPublished, onCancel }: { online: boolean; o
         className="card stack"
         onSubmit={(e) => {
           e.preventDefault()
-          if (title.trim() && !busy) submit()
+          if (title.trim() && !busy) setStep('recap')
         }}
       >
         <h2>Nouvelle annonce</h2>
         <fieldset className="nb-fieldset">
-          <legend>Type</legend>
+          <legend>Que voulez-vous faire ?</legend>
           <div className="nb-chips">
             {POST_KINDS.map((k) => (
               <button key={k} type="button" className={'btn small tall' + (kind === k ? ' on' : '')} aria-pressed={kind === k} onClick={() => setKind(k)}>
@@ -78,13 +140,13 @@ export function PostForm({ online, onPublished, onCancel }: { online: boolean; o
           <textarea className="input" rows={5} value={body} maxLength={NEIGHBORS_LIMITS.bodyMax} placeholder={HINTS[kind].body} onChange={(e) => setBody(e.target.value)} />
         </label>
         <div className="stack">
-          <strong>Espèce du catalogue (facultatif)</strong>
+          <strong>Plante concernée (facultatif)</strong>
           <div className="row">
             <button type="button" className="btn" onClick={() => setPicking(true)}>
-              {species ? species.nomCommun : 'Choisir une espèce'}
+              {species ? species.nomCommun : 'Choisir une plante'}
             </button>
             {species && (
-              <button type="button" className="btn ghost" onClick={() => setSpeciesId(undefined)} aria-label="Retirer l’espèce">
+              <button type="button" className="btn ghost" onClick={() => setSpeciesId(undefined)} aria-label="Retirer la plante">
                 Retirer
               </button>
             )}
@@ -92,16 +154,18 @@ export function PostForm({ online, onPublished, onCancel }: { online: boolean; o
         </div>
         <div className="stack">
           <strong>Photo (facultatif)</strong>
-          <input
-            className="input"
-            type="file"
-            accept="image/jpeg,image/png,image/webp"
-            aria-label="Ajouter une photo"
-            onChange={(e) => {
-              setPhoto(e.target.files?.[0])
-              e.target.value = ''
-            }}
-          />
+          <label className="btn np-photo-btn">
+            <input
+              className="sr-only"
+              type="file"
+              accept="image/jpeg,image/png,image/webp"
+              onChange={(e) => {
+                setPhoto(e.target.files?.[0])
+                e.target.value = ''
+              }}
+            />
+            📷 {photo ? 'Changer la photo' : 'Ajouter une photo'}
+          </label>
           {previewUrl && (
             <div className="row">
               <img className="photo-thumb" src={previewUrl} alt="Aperçu de la photo choisie" />
@@ -111,18 +175,19 @@ export function PostForm({ online, onPublished, onCancel }: { online: boolean; o
             </div>
           )}
           <p className="small muted" style={{ margin: 0 }}>
-            La photo est redessinée sur votre appareil : position GPS et données de l’appareil supprimées.
+            Le lieu de la photo est effacé avant l’envoi.
           </p>
         </div>
         <p className="alert info small" style={{ margin: 0 }}>
-          Votre position est arrondie à ~1 km. L’annonce affiche votre pseudo et votre quartier, et disparaît après {NEIGHBORS_LIMITS.postLifetimeDays} jours.
+          L’annonce montre votre pseudo et votre quartier. Elle disparaît après {NEIGHBORS_LIMITS.postLifetimeDays} jours.
         </p>
         {error && <ErrorBox message={error} />}
-        {!online && <p className="small warn-text" style={{ margin: 0 }}>Vous êtes hors ligne : reconnectez-vous pour publier.</p>}
+        {!online && <p className="small warn-text" style={{ margin: 0 }}>Pas de réseau : reconnectez-vous pour publier.</p>}
         <div className="row">
-          <button className="btn primary" type="submit" disabled={!title.trim() || busy || !online}>
-            {busy && <span className="spinner" />} Publier
+          <button className="btn primary" type="submit" disabled={!title.trim() || busy}>
+            Voir le récapitulatif
           </button>
+          {!title.trim() && <span className="small muted">Écrivez un titre pour continuer.</span>}
           <button type="button" className="btn ghost" onClick={onCancel} disabled={busy}>
             Annuler
           </button>
@@ -130,39 +195,13 @@ export function PostForm({ online, onPublished, onCancel }: { online: boolean; o
       </form>
       {picking && (
         <SpeciesPicker
-          title="Espèce concernée"
+          title="Plante concernée"
           onClose={() => setPicking(false)}
           onPick={(s) => {
             setSpeciesId(s.id)
             setPicking(false)
           }}
         />
-      )}
-      {rules && (
-        <Modal title="Règles de conduite" onClose={() => setRules(false)}>
-          <div className="stack">
-            <p style={{ margin: 0 }}>Avant votre première annonce, quelques règles simples :</p>
-            <ul className="nb-rules">
-              {CONDUCT_RULES.map((r) => (
-                <li key={r}>{r}</li>
-              ))}
-            </ul>
-            <div className="row consent-actions">
-              <button className="btn" onClick={() => setRules(false)}>
-                Retour
-              </button>
-              <button
-                className="btn primary"
-                onClick={() => {
-                  acceptConduct()
-                  void publish()
-                }}
-              >
-                J’ai compris, publier
-              </button>
-            </div>
-          </div>
-        </Modal>
       )}
     </>
   )

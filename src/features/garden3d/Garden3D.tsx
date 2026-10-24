@@ -5,13 +5,14 @@ import { Canvas, type RootState } from '@react-three/fiber'
 import type { Garden, Plant, Species, XY } from '../../types'
 import { Scene } from './Scene'
 import { dateFromDoy, dayOfYear, daysInYearOf, doyOf, formatInGarden, sunState, zonedParts } from './sun'
+import { ERROR_3D_TEXT, ERROR_3D_TITLE, SEASON_SHORTCUTS, describeSun, formatClock, gardenSummary, walkHelp, yearsLabel } from './labels'
 import { disposeBuildingMaterial, heatmapRange, rampColor } from './Ground'
 import { disposePlantMaterials } from './Plants'
 import { disposePartGeometries } from './plantModel'
 import { disposeGrassDetailTexture } from './groundDetail'
 import { NO_INSETS, gardenFrame, type Insets, type Rect, type ViewMode } from './framing'
 import { createWalkShared } from './walk'
-import { Joystick, MiniMap } from './WalkUI'
+import { Joystick, MiniMap, WalkPad } from './WalkUI'
 import './garden3d.css'
 
 export interface Garden3DProps {
@@ -26,6 +27,10 @@ export interface Garden3DProps {
   onPlace?: (position: XY) => void
   /** Carte d'ensoleillement optionnelle (heures de soleil), calculée par l'appelant. Ordre : sud→nord puis ouest→est. */
   sunHeatmap?: { halfSizeM: number; n: number; values: number[] }
+  /** Calcul de la carte d'ensoleillement en cours (l'appelant le sait). */
+  sunComputing?: boolean
+  /** Demande (ou retire, avec undefined) la carte d'ensoleillement pour ce jour : l'interrupteur de la vue. */
+  onSunMapRequest?: (date: Date | undefined) => void
   /** Demi-côté du carré de sol / orthophoto (m). Par défaut : emprise de la parcelle + 25 m de voisinage (30 à 100 m). */
   halfSizeM?: number
   /** Mode de vue au démarrage (perspective par défaut). */
@@ -46,10 +51,10 @@ function disposeSharedResources() {
 }
 
 /** Repli si la 3D ne peut pas démarrer (WebGL absent, mémoire insuffisante) : message utile et « Réessayer ». */
-class CanvasErrorBoundary extends Component<{ children: ReactNode; onFail: (failed: boolean) => void }, { error: boolean }> {
-  state = { error: false }
-  static getDerivedStateFromError() {
-    return { error: true }
+class CanvasErrorBoundary extends Component<{ children: ReactNode; onFail: (failed: boolean) => void }, { error: boolean; detail: string }> {
+  state = { error: false, detail: '' }
+  static getDerivedStateFromError(err: unknown) {
+    return { error: true, detail: err instanceof Error ? err.message : String(err ?? '') }
   }
   componentDidCatch(err: unknown) {
     console.warn('[garden3d] rendu 3D impossible', err)
@@ -57,18 +62,21 @@ class CanvasErrorBoundary extends Component<{ children: ReactNode; onFail: (fail
   }
   retry = () => {
     this.props.onFail(false)
-    this.setState({ error: false })
+    this.setState({ error: false, detail: '' })
   }
   render() {
     if (this.state.error)
       return (
         <div className="g3d-error" role="alert">
           <div className="g3d-error-box">
-            <strong>La vue 3D n’a pas pu démarrer.</strong>
-            <p>
-              Votre appareil ou votre navigateur n’a pas pu afficher la 3D (WebGL indisponible, ou mémoire insuffisante).
-              Fermez les autres onglets puis réessayez. La carte 2D reste disponible.
-            </p>
+            <strong>{ERROR_3D_TITLE}</strong>
+            <p>{ERROR_3D_TEXT}</p>
+            {this.state.detail && (
+              <details className="g3d-error-details">
+                <summary>Détails</summary>
+                <code>{this.state.detail}</code>
+              </details>
+            )}
             <button type="button" className="g3d-btn" onClick={this.retry}>
               Réessayer
             </button>
@@ -93,16 +101,12 @@ function usePrefersReducedMotion(): boolean {
 }
 
 const MODES: { id: ViewMode; label: string; title: string }[] = [
-  { id: 'dessus', label: 'Dessus', title: 'Vue de dessus' },
-  { id: 'perspective', label: 'Perspective', title: 'Vue en perspective' },
-  { id: 'promenade', label: 'Promenade', title: 'Se promener dans le jardin, à hauteur d’yeux' },
+  { id: 'dessus', label: 'Vue de dessus', title: 'Voir le jardin d’en haut, comme un plan' },
+  { id: 'perspective', label: 'Vue en perspective', title: 'Voir le jardin en biais, comme en volant' },
+  { id: 'promenade', label: 'Se promener', title: 'Se promener dans le jardin, à hauteur d’yeux' },
 ]
 
-function formatHour(h: number): string {
-  const hh = Math.floor(h)
-  const mm = Math.round((h - hh) * 60)
-  return mm === 60 ? `${hh + 1} h 00` : `${hh} h ${String(mm).padStart(2, '0')}`
-}
+const formatHour = formatClock
 
 function RecenterIcon() {
   return (
@@ -122,11 +126,6 @@ function PinIcon() {
   )
 }
 
-const CARDINALS = ['N', 'NE', 'E', 'SE', 'S', 'SO', 'O', 'NO']
-function cardinal(deg: number) {
-  return CARDINALS[Math.round(deg / 45) % 8]
-}
-
 function initialHour(center: Garden['center']): number {
   const now = zonedParts(new Date()) // heure légale du jardin, pas celle de l'appareil
   const h = Math.min(HOUR_MAX, Math.max(HOUR_MIN, now.hour + Math.round(now.minute / 15) / 4))
@@ -144,6 +143,8 @@ export function Garden3D({
   placingSpeciesId,
   onPlace,
   sunHeatmap,
+  sunComputing,
+  onSunMapRequest,
   halfSizeM: halfSizeProp,
   defaultView = 'perspective',
 }: Garden3DProps) {
@@ -161,7 +162,7 @@ export function Garden3D({
   const [ctx, setCtx] = useState<'ok' | 'lost' | 'stuck'>('ok')
   const [canvasKey, setCanvasKey] = useState(0)
   const ctxCleanup = useRef<(() => void) | null>(null)
-  const [walkHint, setWalkHint] = useState(false)
+  const [walkHelpOpen, setWalkHelpOpen] = useState(false)
   const rootRef = useRef<HTMLDivElement>(null)
   const walkShared = useMemo(() => createWalkShared(), [])
   const reducedMotion = usePrefersReducedMotion()
@@ -240,18 +241,16 @@ export function Garden3D({
     }
   }, [])
 
-  // Aide de la Promenade : visible quelques secondes à l'entrée.
+  // Aide de la Promenade : ouverte à l'entrée, puis ouverte/fermée par « Comment faire ? » (ne disparaît jamais seule).
   useEffect(() => {
     if (!walking) {
-      setWalkHint(false)
+      setWalkHelpOpen(false)
       setAtLimit(false)
       walkShared.run = false
       setRunning(false)
       return
     }
-    setWalkHint(true)
-    const t = window.setTimeout(() => setWalkHint(false), 9000)
-    return () => window.clearTimeout(t)
+    setWalkHelpOpen(true)
   }, [walking, walkShared])
   const [showHeatmap, setShowHeatmap] = useState(false)
   const [playing, setPlaying] = useState(false)
@@ -304,14 +303,7 @@ export function Garden3D({
     return d.getTime()
   }, [today, yearsAhead])
 
-  const shortcuts = useMemo(
-    () => [
-      { label: '21 mars', doy: doyOf(year, 3, 21) },
-      { label: '21 juin', doy: doyOf(year, 6, 21) },
-      { label: '21 déc.', doy: doyOf(year, 12, 21) },
-    ],
-    [year],
-  )
+  const shortcuts = useMemo(() => SEASON_SHORTCUTS.map((s) => ({ label: s.label, doy: doyOf(year, s.month, s.day) })), [year])
   const daysInYear = daysInYearOf(year)
   const dateLabel = formatInGarden(sunDate, { day: 'numeric', month: 'long' })
 
@@ -322,6 +314,20 @@ export function Garden3D({
     [],
   )
 
+  // Interrupteur d'ensoleillement : l'appelant calcule la carte pour le jour choisi (attente de 0,6 s après le curseur).
+  const sunRequest = useRef(onSunMapRequest)
+  sunRequest.current = onSunMapRequest
+  useEffect(() => {
+    if (!sunRequest.current) return
+    if (!showHeatmap) {
+      sunRequest.current(undefined)
+      return
+    }
+    const t = window.setTimeout(() => sunRequest.current?.(dateFromDoy(year, doy, 12)), 600)
+    return () => window.clearTimeout(t)
+  }, [showHeatmap, doy, year])
+
+  const summary = useMemo(() => gardenSummary(garden.name, plants.length, garden.buildings?.length ?? 0), [garden.name, plants.length, garden.buildings])
   const placingName = placingSpeciesId ? speciesById[placingSpeciesId]?.nomCommun ?? 'la plante' : undefined
   const hasSelection = !!selectedPlantId && plants.some((p) => p.id === selectedPlantId)
 
@@ -334,6 +340,8 @@ export function Garden3D({
           shadows
           dpr={[1, 2]}
           frameloop="demand"
+          role="img"
+          aria-label={summary}
           gl={{ antialias: true, powerPreference: 'high-performance' }}
           onCreated={onCreated}
           onPointerMissed={(e) => {
@@ -372,26 +380,20 @@ export function Garden3D({
         <div className="g3d-top">
           <div className="g3d-left">
             <div className="g3d-chip g3d-info" aria-live="polite">
-              <strong>{dateLabel}</strong> · {formatHour(hour)}
-              <span className="g3d-sun">
-                {sun.altitudeDeg > 0
-                  ? `Soleil ${Math.round(sun.altitudeDeg)}° · ${cardinal(sun.azimuthDeg)}`
-                  : 'Soleil couché'}
-              </span>
-              {yearsAhead > 0 && <span className="g3d-sun">Plantes dans {yearsAhead} an{yearsAhead > 1 ? 's' : ''}</span>}
+              <strong>{dateLabel}</strong>
+              <span className="g3d-sun">{describeSun(hour, sun.altitudeDeg, sun.azimuthDeg)}</span>
+              {yearsAhead > 0 && <span className="g3d-sun">Plantes telles qu’elles seront {yearsLabel(yearsAhead).toLowerCase()}</span>}
             </div>
           </div>
           <div className="g3d-tools">
-            <div className="g3d-compass" title="Nord" aria-label="Flèche du nord">
+            <div className="g3d-compass" title="La flèche rouge montre le nord" aria-label="Flèche du nord">
               <div ref={compassRef} className="g3d-compass-needle">
-                <svg viewBox="0 0 40 40" width="40" height="40" aria-hidden="true">
-                  <polygon className="g3d-needle-north" points="20,4 26,21 20,18 14,21" />
-                  <polygon points="20,36 26,19 20,22 14,19" fill="currentColor" opacity="0.45" />
-                  <text className="g3d-needle-letter" x="20" y="13.5" textAnchor="middle" fontSize="7" fontWeight="700">
-                    N
-                  </text>
+                <svg viewBox="0 0 40 40" width="36" height="36" aria-hidden="true">
+                  <polygon className="g3d-needle-north" points="20,3 27,21 20,17 13,21" />
+                  <polygon points="20,37 27,19 20,23 13,19" fill="currentColor" opacity="0.45" />
                 </svg>
               </div>
+              <span className="g3d-compass-label">Nord</span>
             </div>
             {walking && (
               <MiniMap
@@ -404,15 +406,15 @@ export function Garden3D({
                 bounds={frame.bounds}
               />
             )}
-            {sunHeatmap && (
+            {(sunHeatmap || onSunMapRequest) && (
               <button
                 type="button"
-                className="g3d-btn"
+                className="g3d-btn g3d-sunbtn"
                 aria-pressed={showHeatmap}
                 onClick={() => setShowHeatmap((v) => !v)}
-                title="Afficher la carte d’ensoleillement"
+                title="Colorier le terrain selon le soleil qu’il reçoit le jour choisi"
               >
-                Ensoleillement
+                {showHeatmap ? 'Masquer l’ensoleillement' : 'Voir l’ensoleillement'}
               </button>
             )}
           </div>
@@ -421,10 +423,10 @@ export function Garden3D({
         {ctx !== 'ok' && (
           <div className="g3d-chip g3d-hint g3d-notice" role="status">
             {ctx === 'lost' ? (
-              'Affichage interrompu — reprise automatique…'
+              'L’affichage s’est interrompu. Il revient tout seul…'
             ) : (
               <>
-                Affichage interrompu.{' '}
+                L’affichage s’est interrompu.{' '}
                 <button type="button" className="g3d-btn g3d-btn--small" onClick={() => { setCtx('ok'); setCanvasKey((k) => k + 1) }}>
                   Réessayer
                 </button>
@@ -437,15 +439,20 @@ export function Garden3D({
             Limite du jardin
           </div>
         )}
-        {placingName && <div className="g3d-chip g3d-hint">Touchez le sol pour planter : {placingName}</div>}
+        {placingName && <div className="g3d-chip g3d-hint">Touchez le sol pour placer : {placingName}</div>}
         <div className="g3d-bottom">
-          {showHeatmap && heatRange && (
+          {showHeatmap && sunComputing && (
+            <div className="g3d-chip g3d-legend" role="status">
+              Calcul de l’ensoleillement…
+            </div>
+          )}
+          {showHeatmap && heatRange && !sunComputing && (
             <div className="g3d-chip g3d-legend">
-              <span className="g3d-legend-title">Heures de soleil</span>
+              <span className="g3d-legend-title">Plus la zone est claire, plus elle reçoit de soleil</span>
               <span className="g3d-legend-bar" style={{ background: heatGradient }} />
               <span className="g3d-legend-scale">
-                <span>{heatRange[0].toFixed(1)} h</span>
-                <span>{heatRange[1].toFixed(1)} h</span>
+                <span>{heatRange[0].toLocaleString('fr-FR', { maximumFractionDigits: 1 })} h</span>
+                <span>{heatRange[1].toLocaleString('fr-FR', { maximumFractionDigits: 1 })} h de soleil</span>
               </span>
             </div>
           )}
@@ -453,26 +460,20 @@ export function Garden3D({
           {walking && coarse && (
             <div className="g3d-walkpad">
               <Joystick shared={walkShared} />
-              <button
-                type="button"
-                className="g3d-btn g3d-run"
-                aria-pressed={running}
-                aria-label="Courir"
-                onClick={() => {
+              <WalkPad
+                shared={walkShared}
+                running={running}
+                onToggleRun={() => {
                   walkShared.run = !running
                   setRunning(!running)
                 }}
-              >
-                Courir
-              </button>
+              />
             </div>
           )}
 
-          {walking && walkHint && (
-            <div className="g3d-chip g3d-hint g3d-hint--walk" role="status">
-              {coarse
-                ? 'Joystick pour marcher, glissez pour regarder. Touchez une plante pour la choisir.'
-                : 'ZQSD ou flèches pour marcher, glissez la souris pour regarder, Maj pour courir.'}
+          {walking && walkHelpOpen && (
+            <div className="g3d-chip g3d-hint g3d-hint--walk" id="g3d-walk-help">
+              {walkHelp(coarse)}
             </div>
           )}
 
@@ -494,18 +495,27 @@ export function Garden3D({
             <button
               type="button"
               className="g3d-btn g3d-btn--label g3d-recenter"
-              aria-label={walking ? 'Recentrer : revenir à l’entrée du jardin' : 'Recentrer sur le jardin'}
-              title={walking ? 'Recentrer : revenir à l’entrée du jardin' : 'Recentrer sur le jardin'}
+              title={walking ? 'Revenir à l’entrée du jardin' : 'Cadrer de nouveau tout le jardin'}
               onClick={() => setFitNonce((n) => n + 1)}
             >
               <RecenterIcon />
-              {walking && <span className="g3d-btn-text">Recentrer</span>}
+              <span className="g3d-btn-text">Recentrer</span>
             </button>
+            {walking && (
+              <button
+                type="button"
+                className="g3d-btn g3d-btn--label"
+                aria-expanded={walkHelpOpen}
+                aria-controls="g3d-walk-help"
+                onClick={() => setWalkHelpOpen((v) => !v)}
+              >
+                {walkHelpOpen ? 'Fermer l’aide' : 'Comment faire ?'}
+              </button>
+            )}
             {walking && hasSelection && (
               <button
                 type="button"
                 className="g3d-btn g3d-btn--label g3d-goto"
-                aria-label="Aller à cette plante"
                 title="Aller à cette plante : se placer près d’elle, en la regardant"
                 onClick={() => setGotoNonce((n) => n + 1)}
               >
@@ -516,14 +526,25 @@ export function Garden3D({
           </div>
 
           <div className="g3d-panel">
-            <div className="g3d-row">
-              <button
-                type="button"
-                className="g3d-btn g3d-btn--icon"
-                onClick={togglePlay}
-                aria-label={playing ? 'Pause' : 'Animer la journée'}
-                title={playing ? 'Pause' : 'Animer la journée'}
-              >
+            <label className="g3d-field">
+              <span className="g3d-field-label">
+                Heure <b>{formatHour(hour)}</b>
+              </span>
+              <input
+                type="range"
+                min={HOUR_MIN}
+                max={HOUR_MAX}
+                step={0.25}
+                value={hour}
+                aria-valuetext={formatHour(hour)}
+                onChange={(e) => {
+                  setPlaying(false)
+                  setHour(Number(e.target.value))
+                }}
+              />
+            </label>
+            <div className="g3d-row g3d-row--actions">
+              <button type="button" className="g3d-btn g3d-btn--label" onClick={togglePlay} title="Voir le soleil se déplacer de 5 h à 22 h">
                 {playing ? (
                   <svg viewBox="0 0 20 20" width="18" height="18" aria-hidden="true">
                     <rect x="4" y="3" width="4" height="14" rx="1" fill="currentColor" />
@@ -534,88 +555,65 @@ export function Garden3D({
                     <path d="M5 3l12 7-12 7z" fill="currentColor" />
                   </svg>
                 )}
+                <span className="g3d-btn-text">{playing ? 'Pause' : 'Animer la journée'}</span>
               </button>
-              <label className="g3d-field">
-                <span className="g3d-field-label">
-                  Heure <b>{formatHour(hour)}</b>
-                </span>
-                <input
-                  type="range"
-                  min={HOUR_MIN}
-                  max={HOUR_MAX}
-                  step={0.25}
-                  value={hour}
-                  onChange={(e) => {
-                    setPlaying(false)
-                    setHour(Number(e.target.value))
-                  }}
-                />
-              </label>
               <button
                 type="button"
-                className="g3d-btn g3d-btn--icon"
+                className="g3d-btn g3d-btn--label"
                 onClick={() => setCollapsed((c) => !c)}
                 aria-expanded={!collapsed}
-                aria-label={collapsed ? 'Afficher les réglages' : 'Masquer les réglages'}
-                title={collapsed ? 'Afficher les réglages' : 'Masquer les réglages'}
+                title={collapsed ? 'Afficher le jour et la croissance des plantes' : 'Masquer ces réglages'}
               >
-                <svg
-                  viewBox="0 0 20 20"
-                  width="18"
-                  height="18"
-                  aria-hidden="true"
-                  style={{ transform: collapsed ? 'rotate(180deg)' : undefined }}
-                >
-                  <path d="M5 8l5 5 5-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-                </svg>
+                Réglages {collapsed ? '▾' : '▴'}
               </button>
             </div>
 
             {!collapsed && (
               <>
-                <div className="g3d-row">
-                  <label className="g3d-field">
-                    <span className="g3d-field-label">
-                      Jour <b>{dateLabel}</b>
-                    </span>
-                    <input
-                      type="range"
-                      min={1}
-                      max={daysInYear}
-                      step={1}
-                      value={doy}
-                      onChange={(e) => setDoy(Number(e.target.value))}
-                    />
-                  </label>
-                  <div className="g3d-shortcuts" role="group" aria-label="Dates clés">
-                    {shortcuts.map((s) => (
-                      <button
-                        key={s.label}
-                        type="button"
-                        className="g3d-btn g3d-btn--small"
-                        aria-pressed={doy === s.doy}
-                        onClick={() => setDoy(s.doy)}
-                      >
-                        {s.label}
-                      </button>
-                    ))}
-                  </div>
+                <label className="g3d-field">
+                  <span className="g3d-field-label">
+                    Jour <b>{dateLabel}</b>
+                  </span>
+                  <input
+                    type="range"
+                    min={1}
+                    max={daysInYear}
+                    step={1}
+                    value={doy}
+                    aria-valuetext={dateLabel}
+                    onChange={(e) => setDoy(Number(e.target.value))}
+                  />
+                  <span className="g3d-help">Glissez pour changer de saison : le soleil et les ombres changent.</span>
+                </label>
+                <div className="g3d-shortcuts" role="group" aria-label="Saisons">
+                  {shortcuts.map((s) => (
+                    <button
+                      key={s.label}
+                      type="button"
+                      className="g3d-btn g3d-btn--small"
+                      aria-pressed={doy === s.doy}
+                      onClick={() => setDoy(s.doy)}
+                    >
+                      {s.label}
+                    </button>
+                  ))}
                 </div>
-                <div className="g3d-row">
-                  <label className="g3d-field">
-                    <span className="g3d-field-label">
-                      Croissance <b>{yearsAhead === 0 ? 'aujourd’hui' : `dans ${yearsAhead} an${yearsAhead > 1 ? 's' : ''}`}</b>
-                    </span>
-                    <input
-                      type="range"
-                      min={0}
-                      max={20}
-                      step={1}
-                      value={yearsAhead}
-                      onChange={(e) => setYearsAhead(Number(e.target.value))}
-                    />
-                  </label>
-                </div>
+                <label className="g3d-field">
+                  <span className="g3d-field-label">
+                    <b>{yearsLabel(yearsAhead)}</b>
+                  </span>
+                  <input
+                    type="range"
+                    min={0}
+                    max={20}
+                    step={1}
+                    value={yearsAhead}
+                    aria-label="Dans combien d’années"
+                    aria-valuetext={yearsLabel(yearsAhead)}
+                    onChange={(e) => setYearsAhead(Number(e.target.value))}
+                  />
+                  <span className="g3d-help">Glissez pour voir vos plantes grandir, avec leur ombre.</span>
+                </label>
               </>
             )}
           </div>

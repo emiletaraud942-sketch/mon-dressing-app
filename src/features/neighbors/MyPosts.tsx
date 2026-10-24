@@ -60,7 +60,7 @@ export function MyPosts({ online, onOpen, onNew }: { online: boolean; onOpen: (p
               <div className="row">
                 {st.canClose && (
                   <button className="btn small tall" disabled={busy || !online} onClick={() => void change(p, closePost, 'Annonce terminée.')}>
-                    Clore
+                    Terminer l’annonce
                   </button>
                 )}
                 {st.canReopen && (
@@ -89,7 +89,7 @@ export function MyPosts({ online, onOpen, onNew }: { online: boolean; onOpen: (p
             reload()
           }}
         >
-          <p style={{ margin: 0 }}>« <bdi>{deleting.title}</bdi> » et sa photo seront supprimées. Cela ne rend pas votre quota du jour.</p>
+          <p style={{ margin: 0 }}>« <bdi>{deleting.title}</bdi> » et sa photo seront supprimées. Cela ne rend pas votre limite du jour.</p>
         </Confirm>
       )}
     </div>

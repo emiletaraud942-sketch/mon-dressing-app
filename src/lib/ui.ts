@@ -103,6 +103,8 @@ interface UiState {
   pendingPhotos?: string[]
   /** Placement en série : le mode reste actif après chaque plante, jusqu'à « Terminé ». */
   placingSeries?: { count: number }
+  /** « Déplacer cette plante » : la prochaine pression sur la carte donne son nouvel emplacement. */
+  movingPlantId?: string
   /** Fiche espèce ouverte dans le catalogue. */
   speciesId?: string
   /** Écran « Planter » : emplacement et catégorie choisis. */
@@ -113,6 +115,18 @@ interface UiState {
   focusPlantId?: string
   /** Demande l'ouverture du formulaire « Nouveau jardin » dans les Réglages. */
   newGarden?: boolean
+}
+
+/** Noms des écrans, tels que l'utilisateur les lit (barre de navigation, titre de la page). */
+export const TAB_LABEL: Record<Tab, string> = {
+  carte: 'Carte',
+  '3d': 'Vue 3D',
+  plantes: 'Plantes',
+  entretien: 'Entretien',
+  planter: 'Où planter ?',
+  catalogue: 'Catalogue',
+  reglages: 'Réglages',
+  voisins: 'Entraide',
 }
 
 export const TABS: Tab[] = ['carte', '3d', 'plantes', 'entretien', 'planter', 'catalogue', 'reglages', 'voisins']
@@ -183,7 +197,7 @@ function emit() {
 }
 
 function clearPlacing(u: UiState): UiState {
-  return { ...u, placingSpeciesId: undefined, placingCustomName: undefined, pendingPhotos: undefined, placingSeries: undefined }
+  return { ...u, placingSpeciesId: undefined, placingCustomName: undefined, pendingPhotos: undefined, placingSeries: undefined, movingPlantId: undefined }
 }
 
 /**
@@ -292,13 +306,19 @@ export function startPlacing(speciesId: string, extra: { customName?: string; ph
     pendingPhotos: extra.photos,
     placingSeries: extra.series ? { count: 0 } : undefined,
     selectedPlantId: undefined,
+    movingPlantId: undefined,
     tab: ui.tab === '3d' ? '3d' : 'carte',
   })
 }
 
-/** Arrête le placement (bouton Annuler ou Terminé de la bannière). */
+/** Arrête le placement ou le déplacement (bouton Annuler ou Terminé de la bannière). */
 export function stopPlacing() {
-  setUi({ placingSpeciesId: undefined, placingCustomName: undefined, pendingPhotos: undefined, placingSeries: undefined })
+  setUi({ placingSpeciesId: undefined, placingCustomName: undefined, pendingPhotos: undefined, placingSeries: undefined, movingPlantId: undefined })
+}
+
+/** « Déplacer cette plante » : un appui sur la carte donne le nouvel emplacement (sans glisser). Toujours sur la carte 2D. */
+export function startMoving(plantId: string) {
+  setUi({ movingPlantId: plantId, placingSpeciesId: undefined, placingCustomName: undefined, pendingPhotos: undefined, placingSeries: undefined, tab: 'carte' })
 }
 
 /** Ferme la fiche plante ; si elle a été ouverte par une entrée d'historique propre, revient en arrière (Retour ne la rouvre pas). */

@@ -28,3 +28,26 @@ export async function fetchJson<T = unknown>(url: string, init: RequestInit & { 
     throw new Error(`${service} a renvoyé une réponse illisible.`)
   }
 }
+
+/** Message pour l'écran : une phrase simple, et le détail technique à garder derrière un lien « Détails ». */
+export interface FriendlyError {
+  message: string
+  detail?: string
+}
+
+const GENERIC = 'Un problème est survenu. Réessayez dans un instant.'
+const SERVICE_DOWN = 'Le service ne répond pas pour le moment. Réessayez plus tard.'
+const TECHNICAL = /\((\d{3})\)|\b(HTTP|TypeError|SyntaxError|undefined|null|JSON|fetch|Unexpected|Failed|Error:|status|CORS|abort)\b|[{}[\]]|^\s*\w+Error\b/i
+
+/**
+ * Traduit une erreur (réseau, service, code inattendu) en phrase simple. Le texte d'origine est gardé dans `detail`
+ * quand il est technique : l'interface le montre derrière « Détails », jamais en premier.
+ */
+export function friendlyError(e: unknown): FriendlyError {
+  const raw = (e instanceof Error ? e.message : typeof e === 'string' ? e : '').trim()
+  if (!raw) return { message: GENERIC }
+  if (/^Connexion impossible/.test(raw) || /trop de temps/.test(raw)) return { message: raw }
+  if (/a répondu une erreur|réponse illisible/.test(raw)) return { message: SERVICE_DOWN, detail: raw }
+  if (TECHNICAL.test(raw) || raw.length > 160) return { message: GENERIC, detail: raw }
+  return { message: raw }
+}

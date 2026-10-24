@@ -26,3 +26,11 @@ export function doneTaskLabel(taskKey: string, speciesName: (id: string) => stri
   const name = subject ? speciesName(subject) : undefined
   return name ? `${label} · ${cap(name)}` : label
 }
+
+/** « le 21 octobre » (avec l'année si ce n'est pas l'année en cours). Chaîne vide si la date est illisible. */
+export function doneOnLabel(iso: string, now: Date = new Date()): string {
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return ''
+  const opts: Intl.DateTimeFormatOptions = d.getFullYear() === now.getFullYear() ? { day: 'numeric', month: 'long' } : { day: 'numeric', month: 'long', year: 'numeric' }
+  return `Fait le ${d.toLocaleDateString('fr-FR', opts)}`
+}

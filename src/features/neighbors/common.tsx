@@ -98,7 +98,7 @@ export function ReportDialog({ target, targetId, what, onClose }: { target: Repo
     <Modal title={`Signaler ${what}`} onClose={onClose}>
       <div className="stack">
         <fieldset className="nb-fieldset">
-          <legend>Motif</legend>
+          <legend>Que se passe-t-il ?</legend>
           {(Object.keys(REPORT_REASONS) as ReportReason[]).map((r) => (
             <label key={r} className="nb-radio">
               <input type="radio" name="motif" checked={reason === r} onChange={() => setReason(r)} />
@@ -107,11 +107,11 @@ export function ReportDialog({ target, targetId, what, onClose }: { target: Repo
           ))}
         </fieldset>
         <label className="field">
-          <span>Précisions (facultatif)</span>
+          <span>Dites-nous en plus (facultatif)</span>
           <textarea className="input" rows={3} maxLength={NEIGHBORS_LIMITS.detailsMax} value={details} onChange={(e) => setDetails(e.target.value)} />
         </label>
         <p className="small muted" style={{ margin: 0 }}>
-          Trois signalements de personnes différentes masquent une annonce. Pour ne plus voir quelqu’un, bloquez-le.
+          Si trois personnes la signalent, l’annonce est cachée. Pour ne plus voir quelqu’un, choisissez « Ne plus voir cette personne ».
         </p>
         {error && <ErrorBox message={error} />}
         <div className="row consent-actions">

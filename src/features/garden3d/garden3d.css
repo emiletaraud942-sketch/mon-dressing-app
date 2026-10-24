@@ -15,10 +15,15 @@
   overflow: hidden;
   background: var(--g3d-sky);
   color: var(--g3d-text);
-  font-size: 14px;
+  font-size: 1rem;
   user-select: none;
   -webkit-user-select: none;
   -webkit-tap-highlight-color: transparent;
+}
+
+.g3d-root,
+.g3d-root * {
+  box-sizing: border-box;
 }
 
 .g3d-canvas {
@@ -110,7 +115,7 @@
 }
 .g3d-sun {
   color: var(--g3d-muted);
-  font-size: 12.5px;
+  font-size: 0.875rem;
 }
 
 .g3d-hint {
@@ -130,14 +135,15 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  white-space: nowrap;
-  font-size: 13px;
+  font-size: 0.875rem;
+  max-width: 94%;
 }
 
 .g3d-hint--walk {
   max-width: 94%;
-  font-size: 13px;
-  line-height: 1.35;
+  font-size: 0.9375rem;
+  line-height: 1.4;
+  text-align: left;
 }
 
 .g3d-tools {
@@ -148,31 +154,34 @@
 }
 
 .g3d-compass {
-  width: 44px;
-  height: 44px;
-  display: grid;
-  place-items: center;
-  border-radius: 50%;
+  width: 56px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 4px 0 2px;
+  border-radius: 16px;
   background: color-mix(in srgb, var(--g3d-surface) 90%, transparent);
   border: 1px solid var(--g3d-border);
   box-shadow: 0 2px 10px rgb(0 0 0 / 12%);
   color: var(--g3d-text);
 }
+.g3d-compass-label {
+  font-size: 0.875rem;
+  font-weight: 650;
+  line-height: 1.2;
+}
 .g3d-compass-needle {
-  width: 40px;
-  height: 40px;
+  width: 36px;
+  height: 36px;
   transform-origin: 50% 50%;
 }
 .g3d-needle-north {
   fill: var(--g3d-north);
 }
-.g3d-needle-letter {
-  fill: var(--g3d-surface);
-}
 
 .g3d-btn {
-  min-height: 40px;
-  min-width: 40px;
+  min-height: 44px;
+  min-width: 44px;
   padding: 0 12px;
   border-radius: var(--g3d-radius);
   border: 1px solid var(--g3d-border);
@@ -186,6 +195,7 @@
   align-items: center;
   justify-content: center;
   white-space: nowrap;
+  gap: 6px;
 }
 .g3d-btn:focus-visible {
   outline: 2px solid var(--g3d-accent);
@@ -198,16 +208,15 @@
 }
 .g3d-btn--icon {
   padding: 0;
-  width: 40px;
+  width: 44px;
   flex: none;
 }
-.g3d-btn-text {
-  margin-left: 6px;
-}
 .g3d-btn--small {
-  padding: 0 8px;
-  font-size: 12.5px;
+  padding: 0 10px;
+  font-size: 0.875rem;
   box-shadow: none;
+  white-space: normal;
+  line-height: 1.2;
 }
 
 /* ----- Colonne de gauche : infos + mini-carte ----- */
@@ -229,6 +238,7 @@
 }
 .g3d-seg {
   display: inline-flex;
+  max-width: 100%;
   border: 1px solid var(--g3d-border);
   border-radius: var(--g3d-radius);
   background: color-mix(in srgb, var(--g3d-surface) 92%, transparent);
@@ -236,9 +246,11 @@
   overflow: hidden;
 }
 .g3d-seg-btn {
-  min-height: 40px;
-  min-width: 40px;
-  padding: 0 12px;
+  min-height: 48px;
+  min-width: 44px;
+  flex: 1 1 auto;
+  padding: 4px 12px;
+  line-height: 1.2;
   border: 0;
   border-right: 1px solid var(--g3d-border);
   background: transparent;
@@ -246,7 +258,6 @@
   font: inherit;
   font-weight: 600;
   cursor: pointer;
-  white-space: nowrap;
 }
 .g3d-seg-btn:last-child {
   border-right: 0;
@@ -291,18 +302,45 @@
   box-shadow: 0 2px 8px rgb(0 0 0 / 25%);
   pointer-events: none;
 }
-.g3d-run {
+.g3d-pad {
   position: absolute;
   right: 6px;
-  bottom: 22px;
-  width: 64px;
-  height: 64px;
-  min-height: 56px;
-  border-radius: 50%;
-  padding: 0;
-  font-size: 13px;
-  touch-action: manipulation;
+  bottom: 10px;
+  display: grid;
+  grid-template-columns: repeat(4, 56px);
+  grid-auto-rows: 56px;
+  gap: 4px;
+  pointer-events: none;
 }
+.g3d-padbtn {
+  min-width: 56px;
+  min-height: 56px;
+  padding: 0;
+  font-size: 1.5rem;
+  line-height: 1;
+  touch-action: none;
+  pointer-events: auto;
+  -webkit-touch-callout: none;
+}
+.g3d-padbtn:active {
+  background: var(--g3d-accent);
+  color: var(--g3d-surface);
+}
+.g3d-turn {
+  gap: 4px;
+  font-size: 0.875rem;
+  line-height: 1.15;
+  white-space: normal;
+  padding: 0 6px;
+  flex-direction: column;
+}
+.g3d-turn:nth-child(1) { grid-column: 1 / span 2; grid-row: 1; }
+.g3d-turn:nth-child(2) { grid-column: 3 / span 2; grid-row: 1; }
+.g3d-pad-run { grid-column: 1; grid-row: 2; font-size: 0.875rem; }
+.g3d-pad-left { grid-column: 2; grid-row: 2; }
+.g3d-pad-up { grid-column: 3; grid-row: 2; }
+.g3d-pad-right { grid-column: 4; grid-row: 2; }
+.g3d-pad-down { grid-column: 3; grid-row: 3; }
 .g3d-minimap {
   width: 110px;
   height: 110px;
@@ -311,7 +349,7 @@
   pointer-events: none;
 }
 .g3d-joy:focus-visible,
-.g3d-run:focus-visible {
+.g3d-padbtn:focus-visible {
   outline: 2px solid var(--g3d-accent);
   outline-offset: 2px;
 }
@@ -329,7 +367,8 @@
   display: grid;
   gap: 3px;
   min-width: 160px;
-  font-size: 12px;
+  font-size: 0.875rem;
+  max-width: 320px;
 }
 .g3d-legend-title {
   font-weight: 600;
@@ -353,7 +392,9 @@
   backdrop-filter: blur(6px);
   padding: 6px 10px;
   display: grid;
-  gap: 2px;
+  gap: 4px;
+  max-height: 55vh;
+  overflow-y: auto;
   max-width: 720px;
   width: 100%;
   margin: 0 auto;
@@ -373,8 +414,26 @@
   gap: 0;
 }
 .g3d-field-label {
-  font-size: 12px;
+  font-size: 0.9375rem;
   color: var(--g3d-muted);
+}
+.g3d-help {
+  font-size: 0.875rem;
+  color: var(--g3d-muted);
+  line-height: 1.3;
+}
+.g3d-row--actions > .g3d-btn {
+  flex: 1 1 auto;
+}
+.g3d-error-details {
+  font-size: 0.875rem;
+  text-align: left;
+  max-width: 100%;
+}
+.g3d-error-details code {
+  display: block;
+  margin-top: 4px;
+  overflow-wrap: anywhere;
 }
 .g3d-field-label b {
   color: var(--g3d-text);
@@ -383,7 +442,7 @@
 }
 .g3d-field input[type='range'] {
   width: 100%;
-  height: 40px;
+  height: 44px;
   margin: 0;
   accent-color: var(--g3d-accent);
   cursor: pointer;
@@ -392,7 +451,8 @@
 
 .g3d-shortcuts {
   display: flex;
-  gap: 4px;
+  flex-wrap: wrap;
+  gap: 6px;
   flex: none;
 }
 
@@ -402,7 +462,7 @@
   border-radius: 999px;
   background: color-mix(in srgb, var(--g3d-text) 84%, transparent);
   color: var(--g3d-surface);
-  font: 600 12px/1.3 system-ui, sans-serif;
+  font: 600 0.875rem/1.3 system-ui, sans-serif;
   white-space: nowrap;
   pointer-events: none;
   transform: translateY(-50%);
@@ -413,25 +473,11 @@
 }
 
 @media (max-width: 480px) {
-  /* Écran étroit : les boutons d'action de la Promenade n'affichent que l'icône (nom en aria-label et title). */
-  .g3d-btn.g3d-btn--label {
-    padding: 0;
-    width: 40px;
-  }
-  .g3d-btn--label .g3d-btn-text {
-    display: none;
-  }
-  .g3d-root {
-    font-size: 13px;
-  }
   .g3d-overlay {
     padding: 6px;
   }
   .g3d-panel {
     padding: 4px 8px;
-  }
-  .g3d-row {
-    gap: 6px;
   }
   .g3d-shortcuts {
     width: 100%;
@@ -441,6 +487,11 @@
   }
   .g3d-btn {
     padding: 0 10px;
+  }
+  .g3d-sunbtn {
+    white-space: normal;
+    max-width: 150px;
+    line-height: 1.2;
   }
 }
 

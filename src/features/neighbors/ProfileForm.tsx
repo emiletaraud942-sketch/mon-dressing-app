@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { Modal } from '../../components/Modal'
 import { saveProfile } from '../../lib/neighbors/api'
 import { isValidCoord } from '../../lib/neighbors/cell'
-import { cellPreview, describeCell } from '../../lib/neighbors/logic'
+import { cellPreview, gardenNeighborhoodText, neighborhoodText } from '../../lib/neighbors/logic'
 import { NEIGHBORS_LIMITS, type Cell, type Profile } from '../../lib/neighbors/types'
 import type { Garden } from '../../types'
 import { ErrorBox } from './common'
@@ -45,16 +45,16 @@ export function ProfileForm({ initial, garden, online, onSaved, onCancel }: { in
         }}
       >
         <h2>{initial ? 'Mon profil' : 'Créez votre profil'}</h2>
-        {!initial && <p style={{ margin: 0 }}>Les voisins verront seulement votre pseudo et votre quartier.</p>}
+        {!initial && <p style={{ margin: 0 }}>Les voisins verront seulement votre pseudo et votre commune.</p>}
         <label className="field">
-          <span>Pseudo (3 à 24 caractères)</span>
+          <span>Pseudo (3 à 24 lettres)</span>
           <input className="input" value={pseudo} maxLength={NEIGHBORS_LIMITS.pseudoMax} autoComplete="nickname" onChange={(e) => setPseudo(e.target.value)} placeholder="Jardinier du coin" />
         </label>
         <div className="stack">
           <strong>Quartier</strong>
           {cell ? (
             <p style={{ margin: 0 }}>
-              <span className="badge green">{describeCell(cell)}</span> <span className="small muted">cellule d’environ 1 km</span>
+              <span className="badge green">{neighborhoodText(cell, garden)}</span> <span className="small muted">(environ 1 km autour)</span>
             </p>
           ) : (
             <p className="small muted" style={{ margin: 0 }}>
@@ -62,14 +62,14 @@ export function ProfileForm({ initial, garden, online, onSaved, onCancel }: { in
             </p>
           )}
           <button type="button" className="btn" disabled={!gardenOk} onClick={() => setAsking(true)}>
-            {cell ? 'Changer pour' : 'Utiliser'} le centre de « {garden.name} »
+            {cell ? 'Prendre à nouveau' : 'Utiliser'} l’emplacement de « {garden.name} »
           </button>
           <p className="small muted" style={{ margin: 0 }}>
-            Votre position est arrondie à ~1 km. Votre adresse n’est jamais envoyée.
+            Votre position est arrondie. Votre adresse n’est jamais envoyée.
           </p>
         </div>
         {error && <ErrorBox message={error} />}
-        {!online && <p className="small warn-text" style={{ margin: 0 }}>Vous êtes hors ligne : l’enregistrement attendra.</p>}
+        {!online && <p className="small warn-text" style={{ margin: 0 }}>Pas de réseau : reconnectez-vous pour enregistrer.</p>}
         <div className="row">
           <button className="btn primary" type="submit" disabled={!pseudoOk || !cell || busy || !online}>
             {busy && <span className="spinner" />} Enregistrer
@@ -82,13 +82,13 @@ export function ProfileForm({ initial, garden, online, onSaved, onCancel }: { in
         </div>
       </form>
       {asking && preview && (
-        <Modal title="Confirmer votre quartier" onClose={() => setAsking(false)}>
+        <Modal title="Votre quartier" onClose={() => setAsking(false)}>
           <div className="stack">
             <p style={{ margin: 0 }}>
-              Votre quartier sera <strong>{preview.text}</strong>, une zone d’environ 1 km autour de ce point.
+              Les voisins verront : <strong>{gardenNeighborhoodText(garden)}</strong>. C’est une zone d’environ 1 km.
             </p>
             <p className="small muted" style={{ margin: 0 }}>
-              Les autres membres le voient. Votre adresse et la position exacte de votre jardin ne quittent pas votre appareil.
+              Votre adresse et la position exacte de votre jardin restent sur votre appareil.
             </p>
             <div className="row consent-actions">
               <button type="button" className="btn" onClick={() => setAsking(false)}>
@@ -102,7 +102,7 @@ export function ProfileForm({ initial, garden, online, onSaved, onCancel }: { in
                   setAsking(false)
                 }}
               >
-                Confirmer ce quartier
+                C’est d’accord
               </button>
             </div>
           </div>

@@ -10,7 +10,6 @@ export function useProgress(garden: Garden): Progress {
   const { guide } = useUi()
   return computeProgress(garden, plants, {
     speciesById: SPECIES_BY_ID,
-    opened3d: guide.opened3d.includes(garden.id),
     openedEntretien: guide.openedEntretien.includes(garden.id),
   })
 }

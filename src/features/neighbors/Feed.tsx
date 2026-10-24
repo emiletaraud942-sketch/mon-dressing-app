@@ -13,7 +13,7 @@ export function PostCard({ post, onOpen }: { post: Post; onOpen: (p: Post) => vo
       <span className="row nb-card-top">
         <KindBadge kind={post.kind} />
         <span className="small muted">{post.distanceLabel}</span>
-        {post.photoPath && <span className="badge">Photo</span>}
+        {post.photoPath && <span className="badge">📷 Photo</span>}
       </span>
       <strong className="nb-card-title">
         <bdi>{post.title}</bdi>
@@ -59,18 +59,18 @@ export function Feed({
         </div>
         <div className="row nb-toolbar-row">
           <label className="row small" style={{ gap: 6 }}>
-            <span>Rayon</span>
-            <select className="input nb-radius" value={radius} onChange={(e) => onRadius(Number(e.target.value))} aria-label="Rayon de recherche">
+            <span>Distance</span>
+            <select className="input nb-radius" value={radius} onChange={(e) => onRadius(Number(e.target.value))} aria-label="Distance de recherche">
               {RADII.map((r) => (
                 <option key={r} value={r}>
-                  {r} km
+                  jusqu’à {r} km
                 </option>
               ))}
             </select>
           </label>
           <span className="spacer" />
           <button className="btn primary" onClick={onNew}>
-            Publier
+            Publier une annonce
           </button>
         </div>
       </div>
@@ -89,7 +89,7 @@ export function Feed({
       {data && posts.length === 0 && !error && (
         <div className="card nb-empty">
           <h2>{kind === 'all' ? 'Rien près de chez vous pour l’instant' : 'Aucune annonce de ce type'}</h2>
-          <p style={{ margin: 0 }}>L’entraide démarre avec vous. Quelques idées :</p>
+          <p style={{ margin: 0 }}>Vous pouvez être le premier. Quelques idées :</p>
           <ul className="nb-ideas">
             <li>Don de boutures, de graines ou de surplus du potager.</li>
             <li>Prêt d’un outil : sécateur, bêche, broyeur.</li>
@@ -113,7 +113,7 @@ export function Feed({
           </div>
         </div>
       )}
-      {!online && <p className="small muted">Hors ligne : la liste affichée peut être dépassée.</p>}
+      {!online && <p className="small muted">Pas de réseau : la liste peut être dépassée.</p>}
     </div>
   )
 }

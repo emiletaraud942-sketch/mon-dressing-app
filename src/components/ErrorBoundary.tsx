@@ -1,6 +1,7 @@
 import { Component, type ReactNode } from 'react'
 import { exportCurrentState } from '../lib/backup'
 import { getState } from '../lib/store'
+import { TechDetails } from './ErrorNote'
 
 /** Vrai si l'erreur vient d'un chargement de morceau de code échoué (hors ligne, nouvelle version déployée). */
 export function isChunkLoadError(err: unknown): boolean {
@@ -15,6 +16,12 @@ interface Props {
   resetKey?: unknown
   /** Affichage compact (dans la zone de contenu) plutôt que plein écran. */
   inline?: boolean
+}
+
+/** Texte technique d'une erreur, pour le lien « Détails ». */
+function describe(err: unknown): string {
+  const e = err as { name?: string; message?: string } | null
+  return [e?.name, e?.message].filter(Boolean).join(' : ') || String(err)
 }
 
 export class ErrorBoundary extends Component<Props, { error?: unknown }> {
@@ -49,19 +56,20 @@ export class ErrorBoundary extends Component<Props, { error?: unknown }> {
     return (
       <div className={this.props.inline ? 'empty error-screen' : 'hero error-screen'} role="alert">
         <div className="card" style={{ maxWidth: 480 }}>
-          <h2>Impossible de charger cet écran</h2>
+          <h2>Cet écran ne s’affiche pas</h2>
           <p className="muted">
             {chunk
-              ? "Un morceau de l'appli n'a pas pu être téléchargé (connexion coupée ou nouvelle version en ligne). Vos données sont intactes."
-              : "Une erreur est survenue. Vos données sont intactes sur cet appareil."}
+              ? 'L’appli n’a pas pu charger cet écran. Vérifiez votre connexion, puis rechargez. Vos données sont intactes.'
+              : 'Un problème est survenu. Vos données sont intactes sur cet appareil.'}
           </p>
-          <div className="row" style={{ justifyContent: 'center' }}>
+          <TechDetails detail={describe(error)} />
+          <div className="row" style={{ justifyContent: 'center', marginTop: 8 }}>
             <button className="btn primary" onClick={() => location.reload()}>
               Recharger
             </button>
             {canExport && (
               <button className="btn" onClick={() => this.exportData()}>
-                Exporter mes données
+                Faire une sauvegarde
               </button>
             )}
           </div>

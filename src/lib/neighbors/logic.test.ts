@@ -41,9 +41,9 @@ describe('filtres', () => {
 describe('règles de conduite', () => {
   it('couvrent respect, pas de vente, pas de données personnelles', () => {
     const t = CONDUCT_RULES.join(' ')
-    expect(t).toMatch(/Respect/)
+    expect(t).toMatch(/poli/)
     expect(t).toMatch(/vend/)
-    expect(t).toMatch(/donnée personnelle/)
+    expect(t).toMatch(/e-mail/)
   })
 })
 

@@ -1,24 +1,25 @@
 import { lazy, Suspense, useMemo } from 'react'
 import { SPECIES, SPECIES_BY_ID } from '../../data/species'
-import { CATEGORY_LABEL, SUN_LABEL } from '../../data/labels'
+import { CATEGORY_LABEL } from '../../data/labels'
 import { useGardenPlants } from '../../lib/store'
 import { openSpecies, setMode, setUi, useUi } from '../../lib/ui'
 import { PlaceAction } from '../../components/PlaceAction'
 import { aspectLabel, slopeAt } from '../../lib/terrain'
 import { doyToLabel } from '../../lib/weather'
 import { obstaclesFor, seasonalSunHours } from '../../engine/sun'
-import { recommendSpecies, sunCategory } from '../../engine/planting'
+import { recommendSpecies } from '../../engine/planting'
 import { MONTH_NAMES, whatToSowNow } from '../../engine/calendar'
 import type { Category, Garden, Month, Species, XY } from '../../types'
 import { placePlant } from '../map/placing'
-import { scoreLabel } from './scoreLabel'
+import { scoreLabel, slopePhrase, sunPhrase } from './scoreLabel'
+import '../../styles/novice-pages.css'
 
 const SpotPicker = lazy(() => import('./SpotPicker').then((m) => ({ default: m.SpotPicker })))
 
 function SpeciesChips({ list }: { list: Species[] }) {
-  if (list.length === 0) return <p className="muted small">Rien ce mois-ci.</p>
+  if (list.length === 0) return <p className="muted small">Rien à faire ce mois-ci.</p>
   return (
-    <div className="row" style={{ gap: 4 }}>
+    <div className="row">
       {list.map((s) => (
         <button key={s.id} className="btn small" onClick={() => openSpecies(s.id)}>
           <span className="dot" style={{ background: s.couleurAccent ?? s.couleur }} /> {s.nomCommun}
@@ -36,7 +37,7 @@ function SowNow({ garden }: { garden: Garden }) {
   return (
     <div className="card">
       <div className="row" style={{ justifyContent: 'space-between' }}>
-        <h2>Que semer et planter en</h2>
+        <h2>Ce que vous pouvez faire en</h2>
         <select className="input" style={{ width: 'auto' }} value={month} onChange={(e) => setMonth(Number(e.target.value) as Month)} aria-label="Mois">
           {MONTH_NAMES.map((m, i) => (
             <option key={m} value={i + 1}>
@@ -51,15 +52,16 @@ function SowNow({ garden }: { garden: Garden }) {
           {garden.firstFrostDoy ? `, premières gelées vers le ${doyToLabel(garden.firstFrostDoy)}` : ''} (moyenne sur 5 ans). Le calendrier en tient compte.
         </p>
       ) : (
-        <p className="small muted">Dates de gelées locales inconnues : calendrier national indicatif.</p>
+        <p className="small muted">Dates de gel de votre région inconnues : conseils valables pour toute la France.</p>
       )}
-      <h3>Semis à l'abri</h3>
+      <h3>Semer à l’abri</h3>
+      <p className="small muted" style={{ margin: 0 }}>À l’abri : dans la maison, une serre ou un châssis.</p>
       <SpeciesChips list={now.semisAbri} />
-      <h3 style={{ marginTop: 12 }}>Semis en pleine terre</h3>
+      <h3 style={{ marginTop: 12 }}>Semer en pleine terre</h3>
       <SpeciesChips list={now.semisPleineTerre} />
-      <h3 style={{ marginTop: 12 }}>Plantation</h3>
+      <h3 style={{ marginTop: 12 }}>Planter</h3>
       <SpeciesChips list={now.plantation} />
-      <h3 style={{ marginTop: 12 }}>Récolte</h3>
+      <h3 style={{ marginTop: 12 }}>Récolter</h3>
       <SpeciesChips list={now.recolte} />
     </div>
   )
@@ -88,27 +90,45 @@ function BestForSpot({ garden }: { garden: Garden }) {
   return (
     <div className="card">
       <h2>Quelle plante pour cet endroit ?</h2>
-      <p className="small muted">Touchez un emplacement : l'appli calcule son ensoleillement réel (ombre des bâtiments et des arbres), sa pente, les voisins, et classe les espèces.</p>
+      <ol className="np-steps" style={{ marginBottom: 8 }}>
+        <li>
+          <span className="np-num" aria-hidden>1</span>
+          <span>
+            <strong>Touchez un endroit sur la carte.</strong>
+            <span className="small muted" style={{ display: 'block' }}>L’appli calcule le soleil, la pente et les voisins.</span>
+          </span>
+        </li>
+      </ol>
       <Suspense fallback={<div className="spot-map empty"><span className="spinner" /> Chargement de la carte…</div>}>
         <SpotPicker garden={garden} plants={plants} spot={spot} onPick={setSpot} />
       </Suspense>
       {analysis && spot && (
         <div style={{ marginTop: 12 }}>
-          <div className="grid cols-3" style={{ gap: 8 }}>
-            <div className="small">
-              <div className="muted">Soleil direct</div>
-              <strong>{analysis.sun.moyenne.toFixed(1)} h/jour</strong> · {SUN_LABEL[sunCategory(analysis.sun.moyenne)]}
-              <div className="muted">
-                juin {analysis.sun.juin.toFixed(1)} h · mars {analysis.sun.mars.toFixed(1)} h · déc. {analysis.sun.decembre.toFixed(1)} h
-              </div>
+          <ol className="np-steps" start={2}>
+            <li>
+              <span className="np-num" aria-hidden>2</span>
+              <span>
+                <strong>Voyez ce qui convient ici.</strong>
+              </span>
+            </li>
+          </ol>
+          <div className="stack" style={{ gap: 6, margin: '8px 0' }}>
+            <div>
+              ☀ <strong>{sunPhrase(analysis.sun.moyenne)}</strong>
             </div>
             {analysis.slope && (
-              <div className="small">
-                <div className="muted">Pente</div>
-                <strong>{analysis.slope.pct.toFixed(0)} %</strong>
-                {analysis.slope.pct > 2 ? ` orientée ${aspectLabel(analysis.slope.aspectDeg)}` : ' (terrain plat)'}
+              <div>
+                ⛰ <strong>{slopePhrase(analysis.slope.pct)}</strong>
+                {analysis.slope.pct > 2 ? `, orientée ${aspectLabel(analysis.slope.aspectDeg)}` : ''}
               </div>
             )}
+            <details className="np-details">
+              <summary>Détails du soleil</summary>
+              <p className="small muted" style={{ margin: 0 }}>
+                En juin : {analysis.sun.juin.toLocaleString('fr-FR', { maximumFractionDigits: 1 })} h. En mars : {analysis.sun.mars.toLocaleString('fr-FR', { maximumFractionDigits: 1 })} h. En décembre :{' '}
+                {analysis.sun.decembre.toLocaleString('fr-FR', { maximumFractionDigits: 1 })} h. Ombre des maisons voisines et des arbres comprise.
+              </p>
+            </details>
             <label className="field">
               <span>Type de plante</span>
               <select className="input" value={cat} onChange={(e) => setCat(e.target.value as Category | '')}>
@@ -123,39 +143,54 @@ function BestForSpot({ garden }: { garden: Garden }) {
           </div>
           {analysis.recos.length === 0 && (
             <p className="alert small" style={{ marginTop: 8 }}>
-              Aucune espèce ne convient à cet endroit{cat ? ' dans cette catégorie' : ''}. Essayez un autre emplacement{cat ? ' ou « Toutes » les catégories' : ''}.
+              Aucune plante ne convient à cet endroit{cat ? ' dans ce type' : ''}. Essayez un autre endroit{cat ? ' ou « Toutes »' : ''}.
             </p>
+          )}
+          {analysis.recos.length > 0 && (
+            <ol className="np-steps" start={3} style={{ marginTop: 8 }}>
+              <li>
+                <span className="np-num" aria-hidden>3</span>
+                <span>
+                  <strong>Touchez « Prévoir ici » pour garder une plante.</strong>
+                  <span className="small muted" style={{ display: 'block' }}>Quand vous l’aurez plantée, vous la marquerez « Plantée ».</span>
+                </span>
+              </li>
+            </ol>
           )}
           <ul className="list" style={{ marginTop: 8 }}>
             {analysis.recos.map((r) => {
               const label = scoreLabel(r.score)
+              const pros = r.factors.filter((f) => f.points > 0).slice(0, 4)
+              const cons = r.factors.filter((f) => f.points < 0).slice(0, 4)
               return (
-              <li key={r.species.id}>
-                <div className="row" style={{ justifyContent: 'space-between' }}>
-                  <button className="btn ghost small" style={{ padding: 0 }} onClick={() => openSpecies(r.species.id)}>
-                    <span className="dot" style={{ background: r.species.couleurAccent ?? r.species.couleur }} /> <strong>{r.species.nomCommun}</strong>
-                  </button>
-                  <div className="row" style={{ gap: 6 }}>
-                    <div className={'scorebar ' + label.tone} role="img" aria-label={`Score ${r.score} sur 100`}>
-                      <div style={{ width: `${r.score}%` }} />
-                    </div>
-                    <span className={'badge ' + (label.tone === 'green' ? 'green' : label.tone === 'danger' ? 'danger' : '')}>
-                      {label.text} · {r.score}
+                <li key={r.species.id} className="np-reco">
+                  <div className="row" style={{ justifyContent: 'space-between' }}>
+                    <button className="btn ghost" style={{ padding: '0 4px' }} onClick={() => openSpecies(r.species.id)}>
+                      <span className="dot" style={{ background: r.species.couleurAccent ?? r.species.couleur }} /> <strong>{r.species.nomCommun}</strong>
+                    </button>
+                    <span className={'np-fit ' + (label.tone === 'green' ? 'green' : label.tone === 'danger' ? 'danger' : '')}>
+                      <span aria-hidden>{label.icon}</span> {label.text}
                     </span>
-                    <button className="btn small" onClick={() => placePlant(garden, r.species.id, spot, 'projet', { tab: 'carte' })}>
-                      Planter ici
+                  </div>
+                  {r.warnings.length > 0 && <div className="small warn-text">Attention : {r.warnings.join(' · ')}</div>}
+                  <div className="row" style={{ marginTop: 6 }}>
+                    <button className="btn" onClick={() => placePlant(garden, r.species.id, spot, 'projet', { tab: 'carte' })}>
+                      Prévoir ici
                     </button>
                   </div>
-                </div>
-                <div className="small muted">
-                  {r.factors
-                    .filter((f) => f.points !== 0)
-                    .slice(0, 4)
-                    .map((f) => `${f.points > 0 ? '+' : '−'} ${f.label}`)
-                    .join(' · ')}
-                </div>
-                {r.warnings.length > 0 && <div className="small warn-text">⚠ {r.warnings.join(' · ')}</div>}
-              </li>
+                  <details className="np-details">
+                    <summary>Pourquoi ?</summary>
+                    <ul className="small" style={{ margin: 0, paddingLeft: 18 }}>
+                      {pros.map((f) => (
+                        <li key={'p' + f.label}>Pour : {f.label}</li>
+                      ))}
+                      {cons.map((f) => (
+                        <li key={'c' + f.label}>Contre : {f.label}</li>
+                      ))}
+                      {pros.length + cons.length === 0 && <li>Rien de particulier.</li>}
+                    </ul>
+                  </details>
+                </li>
               )
             })}
           </ul>
@@ -165,7 +200,7 @@ function BestForSpot({ garden }: { garden: Garden }) {
   )
 }
 
-/** Explication quand le jardin n'est pas (encore) modélisé : le calcul marche quand même, en moins précis. */
+/** Explication quand le jardin n'est pas encore bien décrit : le calcul marche quand même, en moins précis. */
 function ModelHint({ garden }: { garden: Garden }) {
   const plants = useGardenPlants(garden.id)
   const noParcel = !garden.parcel?.length
@@ -174,12 +209,12 @@ function ModelHint({ garden }: { garden: Garden }) {
   return (
     <div className="card empty-hint">
       <p style={{ marginTop: 0 }}>
-        <strong>Planifier est plus précis quand le jardin est modélisé.</strong>
+        <strong>Plus votre jardin est décrit, plus le conseil est précis.</strong>
       </p>
       <p className="small" style={{ marginBottom: 12 }}>
-        {noParcel ? "Sans la parcelle, les distances aux voisins ne sont pas vérifiées. " : ''}
-        {noPlants ? "Sans plantes placées, l'ensoleillement ignore l'ombre de vos arbres et les compagnons ne sont pas comptés. " : ''}
-        C'est facultatif : vous pouvez planifier dès maintenant.
+        {noParcel ? "Sans le contour du terrain, les distances aux voisins ne sont pas vérifiées. " : ''}
+        {noPlants ? "Sans plantes placées, le soleil ignore l’ombre de vos arbres. " : ''}
+        C’est facultatif : vous pouvez commencer maintenant.
       </p>
       <div className="row">
         <PlaceAction>Placer une plante</PlaceAction>
@@ -193,8 +228,8 @@ function ModelHint({ garden }: { garden: Garden }) {
 
 export function PlantingPage({ garden }: { garden: Garden }) {
   return (
-    <div className="page">
-      <h1>Choisir et planter</h1>
+    <div className="page np-page">
+      <h1>Où planter ?</h1>
       <ModelHint garden={garden} />
       <div className="grid cols-2" style={{ alignItems: 'start' }}>
         <BestForSpot garden={garden} />

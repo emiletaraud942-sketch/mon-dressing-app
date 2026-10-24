@@ -67,6 +67,85 @@ export function Joystick({ shared }: { shared: WalkShared }) {
   )
 }
 
+type PadAxis = 'forward' | 'back' | 'left' | 'right' | 'turnLeft' | 'turnRight'
+const PAD_VALUES: Record<PadAxis, [keyof WalkShared['pad'], number]> = {
+  forward: ['y', 1],
+  back: ['y', -1],
+  left: ['x', -1],
+  right: ['x', 1],
+  turnLeft: ['turn', 1],
+  turnRight: ['turn', -1],
+}
+
+/** Bouton à maintenir enfoncé (pas de côté, avancer, tourner). Au moins 56 px. */
+function PadButton({ shared, axis, label, className, children }: { shared: WalkShared; axis: PadAxis; label: string; className?: string; children: React.ReactNode }) {
+  const [key, v] = PAD_VALUES[axis]
+  const press = (on: boolean) => {
+    shared.pad[key] = on ? v : 0
+    shared.wake?.()
+  }
+  useEffect(
+    () => () => {
+      shared.pad[key] = 0
+    },
+    [shared, key],
+  )
+  return (
+    <button
+      type="button"
+      className={'g3d-btn g3d-padbtn ' + (className ?? '')}
+      aria-label={label}
+      onPointerDown={(e) => {
+        e.currentTarget.setPointerCapture?.(e.pointerId)
+        press(true)
+      }}
+      onPointerUp={() => press(false)}
+      onPointerCancel={() => press(false)}
+      onLostPointerCapture={() => press(false)}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault()
+          press(true)
+        }
+      }}
+      onKeyUp={() => press(false)}
+      onBlur={() => press(false)}
+      onContextMenu={(e) => e.preventDefault()}
+    >
+      {children}
+    </button>
+  )
+}
+
+/** Croix de boutons ↑ ↓ ← → (marcher, pas de côté) et « Tourner à gauche / droite » : en plus du joystick. */
+export function WalkPad({ shared, running, onToggleRun }: { shared: WalkShared; running: boolean; onToggleRun: () => void }) {
+  return (
+    <div className="g3d-pad" role="group" aria-label="Boutons de déplacement : maintenez pour avancer">
+      <PadButton shared={shared} axis="turnLeft" label="Tourner à gauche" className="g3d-turn">
+        <span aria-hidden="true">↶</span> Tourner à gauche
+      </PadButton>
+      <PadButton shared={shared} axis="turnRight" label="Tourner à droite" className="g3d-turn">
+        <span aria-hidden="true">↷</span> Tourner à droite
+      </PadButton>
+      <PadButton shared={shared} axis="left" label="Pas à gauche" className="g3d-pad-left">
+        ←
+      </PadButton>
+      <PadButton shared={shared} axis="forward" label="Avancer" className="g3d-pad-up">
+        ↑
+      </PadButton>
+      <PadButton shared={shared} axis="right" label="Pas à droite" className="g3d-pad-right">
+        →
+      </PadButton>
+      <button type="button" className="g3d-btn g3d-padbtn g3d-pad-run" aria-pressed={running} onClick={onToggleRun}>
+        Courir
+      </button>
+      <PadButton shared={shared} axis="back" label="Reculer" className="g3d-pad-down">
+        ↓
+      </PadButton>
+    </div>
+  )
+}
+
 const SIZE = 110
 
 interface MiniMapProps {
@@ -165,9 +244,9 @@ export function MiniMap({ shared, parcel, buildings, plants, speciesById, select
     b.stroke()
     // « N » du nord
     b.fillStyle = text
-    b.font = '700 10px system-ui, sans-serif'
+    b.font = '700 14px system-ui, sans-serif'
     b.textAlign = 'center'
-    b.fillText('N', SIZE / 2, 13)
+    b.fillText('N', SIZE / 2, 17)
 
     const draw = () => {
       ctx.setTransform(1, 0, 0, 1, 0, 0)

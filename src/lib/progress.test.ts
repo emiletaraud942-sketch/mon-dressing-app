@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { Garden, Plant } from '../types'
-import { computeProgress, suggestedMode, type ProgressOpts } from './progress'
+import { computeProgress, firstSteps, suggestedMode, type ProgressOpts } from './progress'
 
 const SPECIES: ProgressOpts['speciesById'] = {
   pommier: { strate: 'arbre-bas' },
@@ -26,11 +26,13 @@ const plant = (speciesId: string, p: Partial<Plant> = {}): Plant => ({
 const step = (g: Garden, plants: Plant[], id: string, o: Partial<ProgressOpts> = {}) => computeProgress(g, plants, opts(o)).steps.find((s) => s.id === id)!
 
 describe('computeProgress : étapes', () => {
-  it('jardin vide : seule l’adresse est faite (1 sur 7)', () => {
+  it('jardin vide : seule l’adresse est faite (1 sur 5)', () => {
     const p = computeProgress(garden(), [], opts())
-    expect(p.steps).toHaveLength(7)
+    expect(p.steps).toHaveLength(5)
+    expect(p.doneCount).toBe(1)
+    expect(p.total).toBe(5)
     expect(p.steps.filter((s) => s.done).map((s) => s.id)).toEqual(['adresse'])
-    expect(p.percent).toBe(14)
+    expect(p.percent).toBe(20)
     expect(p.next?.id).toBe('donnees')
     expect(p.placedCount).toBe(0)
   })
@@ -60,16 +62,18 @@ describe('computeProgress : étapes', () => {
     expect(step(garden(), four, 'cinq-plantes').hint).toContain('4 sur 5')
   })
 
-  it('photo : une seule suffit', () => {
-    expect(step(garden(), [plant('tomate')], 'photo').done).toBe(false)
-    expect(step(garden(), [plant('tomate'), plant('tomate', { photos: ['ph1'] })], 'photo').done).toBe(true)
+  it('ni la photo ni la vue 3D ne comptent dans la jauge', () => {
+    const ids = computeProgress(garden(), [], opts()).steps.map((x) => x.id)
+    expect(ids).toEqual(['adresse', 'donnees', 'premier-arbre', 'cinq-plantes', 'sol'])
   })
 
-  it('sol et vue 3D', () => {
+  it('sol', () => {
     expect(step(garden(), [], 'sol').done).toBe(false)
     expect(step(garden({ sol: 'argileux' }), [], 'sol').done).toBe(true)
-    expect(step(garden(), [], 'vue-3d').done).toBe(false)
-    expect(step(garden(), [], 'vue-3d', { opened3d: true }).done).toBe(true)
+  })
+
+  it('« Premiers pas » : 3 étapes qui demandent un geste', () => {
+    expect(firstSteps(computeProgress(garden(), [], opts())).map((x) => x.id)).toEqual(['premier-arbre', 'cinq-plantes', 'sol'])
   })
 
   it('les étapes faites n’ont pas de bouton d’action utile, les autres en ont un', () => {
@@ -80,8 +84,8 @@ describe('computeProgress : étapes', () => {
 
   it('jardin complet : 100 %, plus de prochaine étape', () => {
     const parcel = [{ x: 0, y: 0 }, { x: 1, y: 0 }, { x: 1, y: 1 }]
-    const plants = [plant('pommier', { photos: ['x'] }), ...Array.from({ length: 4 }, () => plant('tomate'))]
-    const p = computeProgress(garden({ parcel, buildings: [], sol: 'limoneux' }), plants, opts({ opened3d: true }))
+    const plants = [plant('pommier'), ...Array.from({ length: 4 }, () => plant('tomate'))]
+    const p = computeProgress(garden({ parcel, buildings: [], sol: 'limoneux' }), plants, opts())
     expect(p.percent).toBe(100)
     expect(p.next).toBeUndefined()
     expect(p.steps.every((s) => s.done)).toBe(true)
@@ -91,32 +95,32 @@ describe('computeProgress : étapes', () => {
 describe('pourcentage', () => {
   it('arrondit étapes faites / total', () => {
     const g = garden({ sol: 'sableux' })
-    expect(computeProgress(g, [], opts()).percent).toBe(29) // 2 sur 7
-    expect(computeProgress(g, [], opts({ opened3d: true })).percent).toBe(43) // 3 sur 7
+    expect(computeProgress(g, [], opts()).percent).toBe(40) // 2 sur 5
+    expect(computeProgress(g, [plant('pommier')], opts()).percent).toBe(60) // 3 sur 5
   })
 })
 
 describe('suggestedMode', () => {
   const parcel = [{ x: 0, y: 0 }, { x: 1, y: 0 }, { x: 1, y: 1 }]
   const three = [plant('pommier'), plant('tomate'), plant('tomate')]
-  const ready = garden({ parcel, buildings: [], sol: 'argileux' }) // adresse + données + sol + arbre + 3D = 5 sur 7 (71 %)
+  const ready = garden({ parcel, buildings: [], sol: 'argileux' }) // adresse + données + sol + arbre = 4 sur 5 (80 %)
 
   it('jardin vide : « jardin »', () => {
     expect(suggestedMode(computeProgress(garden(), [], opts()))).toBe('jardin')
   })
-  it('70 % et 3 plantes : « entretenir »', () => {
-    const p = computeProgress(ready, three, opts({ opened3d: true }))
-    expect(p.percent).toBe(71)
+  it('80 % et 3 plantes : « entretenir »', () => {
+    const p = computeProgress(ready, three, opts())
+    expect(p.percent).toBe(80)
     expect(suggestedMode(p)).toBe('entretenir')
   })
-  it('70 % mais moins de 3 plantes : « jardin »', () => {
-    expect(suggestedMode(computeProgress(ready, three.slice(0, 2), opts({ opened3d: true })))).toBe('jardin')
+  it('80 % mais moins de 3 plantes : « jardin »', () => {
+    expect(suggestedMode(computeProgress(ready, three.slice(0, 2), opts()))).toBe('jardin')
   })
   it('3 plantes mais moins de 70 % : « jardin »', () => {
     expect(suggestedMode(computeProgress(garden(), three, opts()))).toBe('jardin')
   })
   it('« planifier » seulement si Entretien a déjà été ouvert', () => {
-    expect(suggestedMode(computeProgress(ready, three, opts({ opened3d: true, openedEntretien: true })))).toBe('planifier')
+    expect(suggestedMode(computeProgress(ready, three, opts({ openedEntretien: true })))).toBe('planifier')
     expect(suggestedMode(computeProgress(garden(), three, opts({ openedEntretien: true })))).toBe('jardin')
   })
 })

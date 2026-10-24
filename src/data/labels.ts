@@ -26,8 +26,8 @@ export const SUN_LABEL: Record<Sun, string> = { 'plein-soleil': 'Plein soleil', 
 export const WATER_LABEL: Record<Water, string> = { faible: 'Peu d’eau', moyen: 'Arrosage moyen', eleve: 'Beaucoup d’eau' }
 
 export const STATUS_LABEL: Record<PlantStatus, string> = {
-  projet: 'En projet',
-  'en-place': 'En place',
+  projet: 'Prévue',
+  'en-place': 'Plantée',
   malade: 'Malade',
   mort: 'Morte',
 }

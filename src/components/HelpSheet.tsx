@@ -12,25 +12,23 @@ export function HelpSheet({ tab, onClose }: { tab: Tab; onClose: () => void }) {
     <Modal title={view === 'ecran' ? `Aide : ${help.title}` : MODES_HELP.title} sheet onClose={onClose}>
       {view === 'ecran' ? (
         <div className="stack help-body">
+          <button className="btn" onClick={() => setView('modes')}>
+            À quoi servent les 3 modes ?
+          </button>
           <ol className="help-steps">
             {help.steps.map((s) => (
               <li key={s}>{s}</li>
             ))}
           </ol>
-          <div className="stack help-links">
-            <button
-              className="btn"
-              onClick={() => {
-                onClose()
-                showFirstSteps()
-              }}
-            >
-              Revoir Premiers pas
-            </button>
-            <button className="btn" onClick={() => setView('modes')}>
-              À quoi servent les 3 modes ?
-            </button>
-          </div>
+          <button
+            className="btn"
+            onClick={() => {
+              onClose()
+              showFirstSteps()
+            }}
+          >
+            Revoir les premiers pas
+          </button>
           <LegalLinks onOpen={onClose} />
         </div>
       ) : (
@@ -47,7 +45,7 @@ export function HelpSheet({ tab, onClose }: { tab: Tab; onClose: () => void }) {
             {MODES_HELP.optional}
           </p>
           <button className="btn" onClick={() => setView('ecran')}>
-            Retour à l’aide de l’écran
+            Retour à l’aide
           </button>
         </div>
       )}

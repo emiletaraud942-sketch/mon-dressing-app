@@ -4,6 +4,7 @@ import { SPECIES_BY_ID } from '../../data/species'
 import { Icon } from '../../components/Icon'
 import { CADASTRE_MAXZOOM, CADASTRE_TILES, IGN_ATTRIBUTION, ORTHO_MAXZOOM, ORTHO_TILES, PLAN_MAXZOOM, PLAN_TILES } from '../../lib/ign'
 import { toLocal, toLonLat } from '../../lib/geo'
+import { PlaceAction } from '../../components/PlaceAction'
 import { updatePlant, useGardenPlants } from '../../lib/store'
 import { showToast } from '../../lib/toast'
 import { setUi, useUi } from '../../lib/ui'
@@ -14,7 +15,8 @@ import { plantName } from '../plants/PlantPanel'
 import { cssVar } from './colors'
 import { GardenSide, PlacingBanner } from './GardenSide'
 import { SidePanel } from './SidePanel'
-import { placePlant } from './placing'
+import { movePlant, placePlant } from './placing'
+import { dragThresholdPx, nudgePosition } from './nudge'
 
 type Feature = GeoJSON.Feature<GeoJSON.Polygon, Record<string, unknown>>
 
@@ -65,25 +67,46 @@ const fitPadding = () => ({ top: window.innerWidth <= 760 ? 72 : 64, left: 24, r
 const TILE_ERRORS_BEFORE_NOTICE = 3
 const TILE_SOURCES = new Set(['ortho', 'plan', 'cadastre'])
 const isPhone = () => window.matchMedia('(max-width: 760px)').matches
+const isTouch = () => window.matchMedia('(pointer: coarse)').matches
+
+/** « Afficher les noms » : choix mémorisé ; sans choix, les noms s'affichent tant que le jardin reste lisible. */
+const NAMES_KEY = 'pj.mapNames'
+const MANY_PLANTS = 15
+function readNames(plantCount: number): boolean {
+  try {
+    const v = localStorage.getItem(NAMES_KEY)
+    if (v === '1') return true
+    if (v === '0') return false
+  } catch {
+    /* mémoire indisponible */
+  }
+  return plantCount <= MANY_PLANTS
+}
 
 export function MapView({ garden }: { garden: Garden }) {
   const el = useRef<HTMLDivElement>(null)
   const map = useRef<MLMap>()
   const markers = useRef(new Map<string, maplibregl.Marker>())
   const plants = useGardenPlants(garden.id)
-  const { selectedPlantId, placingSpeciesId } = useUi()
+  const { selectedPlantId, placingSpeciesId, movingPlantId } = useUi()
   const [base, setBase] = useState<'ortho' | 'plan'>('ortho')
   const [cadastre, setCadastre] = useState(true)
   const [adult, setAdult] = useState(false)
   const [ready, setReady] = useState(false)
   const [tileProblem, setTileProblem] = useState(false)
   const [legendOpen, setLegendOpen] = useState(false)
+  const [optionsOpen, setOptionsOpen] = useState(false)
+  const [names, setNames] = useState(() => readNames(plants.length))
+  const namesRef = useRef(names)
+  namesRef.current = names
   const gardenRef = useRef(garden)
   gardenRef.current = garden
   const placingRef = useRef(placingSpeciesId)
   placingRef.current = placingSpeciesId
   const plantsRef = useRef(plants)
   plantsRef.current = plants
+  const movingRef = useRef(movingPlantId)
+  movingRef.current = movingPlantId
 
   const fit = (animate = true) =>
     map.current?.fitBounds(gardenBounds(garden, plantsRef.current), {
@@ -116,8 +139,8 @@ export function MapView({ garden }: { garden: Garden }) {
       },
     })
     m.addControl(new maplibregl.AttributionControl({ compact: true }))
-    // Sur téléphone on zoome au pincement : pas de boutons qui prennent la place de la barre d'outils.
-    if (!isPhone()) m.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), 'top-right')
+    // Boutons + et − sur tous les écrans (44 px, voir app.css) ; la boussole seulement sur grand écran.
+    m.addControl(new maplibregl.NavigationControl({ visualizePitch: true, showCompass: !isPhone() }), 'top-right')
     m.addControl(new maplibregl.ScaleControl({ unit: 'metric' }), 'bottom-left')
     m.on('load', () => {
       m.fitBounds(gardenBounds(garden, plantsRef.current), { padding: fitPadding(), maxZoom: 21, duration: 0 })
@@ -136,6 +159,11 @@ export function MapView({ garden }: { garden: Garden }) {
       setReady(true)
     })
     m.on('click', (e) => {
+      const mv = movingRef.current
+      if (mv) {
+        movePlant(mv, toLocal(gardenRef.current.center, { lon: e.lngLat.lng, lat: e.lngLat.lat }))
+        return
+      }
       const sp = placingRef.current
       if (sp) placePlant(gardenRef.current, sp, toLocal(gardenRef.current.center, { lon: e.lngLat.lng, lat: e.lngLat.lat }))
     })
@@ -215,6 +243,9 @@ export function MapView({ garden }: { garden: Garden }) {
         hit.tabIndex = 0
         hit.setAttribute('role', 'button')
         hit.appendChild(document.createElement('span'))
+        const tag = document.createElement('span')
+        tag.className = 'marker-label'
+        hit.appendChild(tag)
         const select = () => setUi({ selectedPlantId: p.id })
         hit.addEventListener('click', (ev) => {
           ev.stopPropagation()
@@ -224,9 +255,17 @@ export function MapView({ garden }: { garden: Garden }) {
           if (ev.key === 'Enter' || ev.key === ' ') {
             ev.preventDefault()
             select()
+            return
+          }
+          // Flèches : déplace la plante de 50 cm (2 m avec Maj), sans glisser.
+          const cur = plantsRef.current.find((x) => x.id === p.id)
+          const np = cur && nudgePosition(cur.position, ev.key, ev.shiftKey)
+          if (np) {
+            ev.preventDefault()
+            updatePlant(p.id, { position: np })
           }
         })
-        mk = new maplibregl.Marker({ element: hit, draggable: true }).setLngLat([ll.lon, ll.lat]).addTo(m)
+        mk = new maplibregl.Marker({ element: hit, draggable: true, clickTolerance: dragThresholdPx(isTouch()) }).setLngLat([ll.lon, ll.lat]).addTo(m)
         let from: XY | undefined
         mk.on('dragstart', () => {
           from = plantsRef.current.find((x) => x.id === p.id)?.position
@@ -246,14 +285,18 @@ export function MapView({ garden }: { garden: Garden }) {
       } else mk.setLngLat([ll.lon, ll.lat])
       const hit = mk.getElement()
       const dot = hit.firstElementChild as HTMLElement
+      const tag = hit.lastElementChild as HTMLElement
       const sel = p.id === selectedPlantId
       hit.className = 'marker-hit' + (sel ? ' selected' : '')
       dot.className = 'map-marker' + (sel ? ' selected' : '') + (p.status === 'projet' ? ' projet' : '')
       dot.style.width = dot.style.height = (sel ? 20 : 14) + 'px'
       dot.style.background = s?.couleurAccent ?? s?.couleur ?? cssVar('--accent-2', '#4f8a4b')
-      const label = plantName(p) + (p.status === 'projet' ? ' (en projet)' : '')
+      const label = plantName(p) + (p.status === 'projet' ? ' (prévue)' : '')
       hit.title = label
       hit.setAttribute('aria-label', label)
+      // Le nom s'affiche pour la plante choisie, et pour toutes si « Afficher les noms » est actif.
+      tag.textContent = names || sel ? plantName(p) : ''
+      tag.hidden = !(names || sel)
     }
     for (const [id, mk] of markers.current) {
       if (!seen.has(id)) {
@@ -261,7 +304,7 @@ export function MapView({ garden }: { garden: Garden }) {
         markers.current.delete(id)
       }
     }
-  }, [plants, selectedPlantId, garden.center, ready])
+  }, [plants, selectedPlantId, garden.center, ready, names])
 
   // « 📍 plante » d'une tâche, « Voir sur la carte » : la carte se centre sur la plante.
   const { focusPlantId } = useUi()
@@ -277,12 +320,12 @@ export function MapView({ garden }: { garden: Garden }) {
 
   useEffect(() => {
     const c = map.current?.getCanvas()
-    if (c) c.style.cursor = placingSpeciesId ? 'crosshair' : ''
-  }, [placingSpeciesId, ready])
+    if (c) c.style.cursor = placingSpeciesId || movingPlantId ? 'crosshair' : ''
+  }, [placingSpeciesId, movingPlantId, ready])
 
   return (
     <div className="workspace">
-      <div className={'canvas-wrap' + (placingSpeciesId ? ' placing' : '')}>
+      <div className={'canvas-wrap' + (placingSpeciesId || movingPlantId ? ' placing' : '')}>
         <div ref={el} className="map" />
         <div className="map-top">
           <div className="floating row small map-toolbar" role="toolbar" aria-label="Réglages de la carte">

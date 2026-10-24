@@ -1,6 +1,11 @@
 import type { Month } from '../types'
+import { monthsPhrase } from '../lib/monthPhrase'
+import '../styles/novice-pages.css'
 
+const MONTHS = ['janvier', 'février', 'mars', 'avril', 'mai', 'juin', 'juillet', 'août', 'septembre', 'octobre', 'novembre', 'décembre']
 const LETTERS = ['J', 'F', 'M', 'A', 'M', 'J', 'J', 'A', 'S', 'O', 'N', 'D']
+
+type Kind = NonNullable<MonthRow['kind']>
 
 export interface MonthRow {
   label: string
@@ -8,12 +13,15 @@ export interface MonthRow {
   kind?: 'abri' | 'plant' | 'harvest' | 'default'
 }
 
-const LEGEND: Record<NonNullable<MonthRow['kind']>, string> = {
+const LEGEND: Record<Kind, string> = {
   abri: 'Semis à l’abri',
   default: 'Semis en pleine terre',
   plant: 'Plantation',
   harvest: 'Récolte',
 }
+/** Symbole en plus de la couleur : le calendrier se lit aussi en noir et blanc. */
+export const SYMBOL: Record<Kind, string> = { abri: '▲', default: '◆', plant: '●', harvest: '■' }
+const VERB: Record<Kind, string> = { abri: 'Semez à l’abri', default: 'Semez en pleine terre', plant: 'Plantez', harvest: 'Récoltez' }
 
 export function MonthGrid({ rows }: { rows: MonthRow[] }) {
   const now = new Date().getMonth() + 1
@@ -22,40 +30,62 @@ export function MonthGrid({ rows }: { rows: MonthRow[] }) {
   const kinds = Array.from(new Set(visible.map((r) => r.kind ?? 'default')))
   return (
     <>
-      <div className="months" role="table" aria-label="Calendrier">
-        <span />
-        {LETTERS.map((l, i) => (
-          <span key={i} className="h">
-            {l}
-          </span>
-        ))}
+      <ul className="list mg-summary" aria-label="Résumé du calendrier">
         {visible.map((r) => (
-          <Row key={r.label} row={r} now={now} />
+          <li key={r.label}>
+            <strong>{VERB[r.kind ?? 'default']}</strong> {monthsPhrase(r.months!)}.
+          </li>
         ))}
+      </ul>
+      <div className="mg-wrap">
+        <table className="mg-table">
+          <caption className="sr-only">Calendrier des mois</caption>
+          <thead>
+            <tr>
+              <td />
+              {LETTERS.map((l, i) => (
+                <th key={i} scope="col" className={i + 1 === now ? 'now' : undefined} aria-label={MONTHS[i] + (i + 1 === now ? ' (mois en cours)' : '')}>
+                  <span aria-hidden>{l}</span>
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {visible.map((r) => {
+              const k = r.kind ?? 'default'
+              return (
+                <tr key={r.label}>
+                  <th scope="row">{r.label}</th>
+                  {Array.from({ length: 12 }, (_, i) => {
+                    const on = r.months!.includes((i + 1) as Month)
+                    return (
+                      <td key={i} className={(on ? 's-' + k : '') + (i + 1 === now ? ' now' : '')}>
+                        {on && (
+                          <>
+                            <span aria-hidden>{SYMBOL[k]}</span>
+                            <span className="sr-only">oui</span>
+                          </>
+                        )}
+                      </td>
+                    )
+                  })}
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
       </div>
       <ul className="legend small" aria-label="Légende du calendrier">
         {kinds.map((k) => (
           <li key={k}>
-            <span className={`swatch ${k}`} aria-hidden /> {LEGEND[k]}
+            <span className={`mg-sym s-${k}`} aria-hidden>
+              {SYMBOL[k]}
+            </span>{' '}
+            {LEGEND[k]}
           </li>
         ))}
-        <li>
-          <span className="swatch now" aria-hidden /> Mois en cours
-        </li>
+        <li>Cadre noir : mois en cours</li>
       </ul>
-    </>
-  )
-}
-
-function Row({ row, now }: { row: MonthRow; now: number }) {
-  return (
-    <>
-      <span>{row.label}</span>
-      {Array.from({ length: 12 }, (_, i) => {
-        const m = (i + 1) as Month
-        const on = row.months!.includes(m)
-        return <span key={i} className={`m${on ? ' on' : ''}${on && row.kind ? ' ' + row.kind : ''}${m === now ? ' now' : ''}`} title={on ? row.label : undefined} />
-      })}
     </>
   )
 }

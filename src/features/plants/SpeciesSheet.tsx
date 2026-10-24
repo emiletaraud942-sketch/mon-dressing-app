@@ -5,6 +5,7 @@ import { MonthGrid } from '../../components/MonthGrid'
 import { MONTH_NAMES, plantingCalendar } from '../../engine/calendar'
 import { openSpecies, startPlacing } from '../../lib/ui'
 import type { Garden, Species, TaskCondition } from '../../types'
+import '../../styles/novice-pages.css'
 
 const CONDITION_LABEL: Record<TaskCondition, string> = {
   'hors-gel': 'hors gel',
@@ -45,34 +46,51 @@ export function SpeciesSheet({ species: s, garden }: { species: Species; garden:
         <div className="muted small">
           <i>{s.nomLatin}</i> · {s.famille}
         </div>
-        <div className="row" style={{ gap: 4, marginTop: 8 }}>
-          <span className="badge green">{CATEGORY_LABEL[s.categorie]}</span>
-          <span className="badge">{STRATE_LABEL[s.strate]}</span>
-          <span className="badge">{s.vivace ? 'Vivace' : 'Annuelle'}</span>
-          {s.soleil.map((x) => (
-            <span key={x} className="badge">☀ {SUN_LABEL[x]}</span>
-          ))}
-          <span className="badge">💧 {WATER_LABEL[s.eau]}</span>
-          <span className="badge">❄ jusqu'à {s.rusticiteC} °C</span>
-          {s.fixateurAzote && <span className="badge green">Fixe l'azote</span>}
-          {s.mellifere && <span className="badge warn">Mellifère</span>}
-          {s.comestible && <span className="badge green">Comestible{s.partiesComestibles?.length ? ` : ${s.partiesComestibles.join(', ')}` : ''}</span>}
-        </div>
+        <dl className="np-facts" style={{ marginTop: 10 }}>
+          <dt>Aime</dt>
+          <dd>{s.soleil.map((x) => SUN_LABEL[x]).join(' ou ')}</dd>
+          <dt>Arrosage</dt>
+          <dd>{WATER_LABEL[s.eau]}</dd>
+          <dt>Froid supporté</dt>
+          <dd>jusqu’à {s.rusticiteC.toLocaleString('fr-FR')} °C</dd>
+          <dt>Type</dt>
+          <dd>
+            {CATEGORY_LABEL[s.categorie]} · {STRATE_LABEL[s.strate]} · {s.vivace ? 'revient chaque année' : 'à semer chaque année'}
+          </dd>
+        </dl>
+        <ul className="list small" style={{ marginTop: 8 }}>
+          {s.fixateurAzote && (
+            <li>
+              <strong>Fixe l’azote</strong> : elle nourrit le sol, ses voisines en profitent.
+            </li>
+          )}
+          {s.mellifere && (
+            <li>
+              <strong>Mellifère</strong> : ses fleurs nourrissent les abeilles.
+            </li>
+          )}
+          {s.comestible && (
+            <li>
+              <strong>Comestible</strong>
+              {s.partiesComestibles?.length ? ` : ${s.partiesComestibles.join(', ')}` : ''}.
+            </li>
+          )}
+        </ul>
       </div>
 
       <p className="small" style={{ margin: 0 }}>
-        Adulte : {s.hauteurAdulteM} m de haut × {s.envergureAdulteM} m de large
-        {s.vivace && s.anneesMaturite > 1 ? `, en ${s.anneesMaturite} ans environ` : ''}. Espacement : {s.espacementCm >= 100 ? `${s.espacementCm / 100} m` : `${s.espacementCm} cm`}.
+        Adulte : {s.hauteurAdulteM.toLocaleString('fr-FR')} m de haut et {s.envergureAdulteM.toLocaleString('fr-FR')} m de large
+        {s.vivace && s.anneesMaturite > 1 ? `, en ${s.anneesMaturite} ans environ` : ''}. Distance entre deux pieds : {s.espacementCm >= 100 ? `${(s.espacementCm / 100).toLocaleString('fr-FR')} m` : `${s.espacementCm} cm`}.
         {s.solPrefere?.length ? ` Sol : ${s.solPrefere.join(', ')}` : ''}
         {s.ph ? ` (pH ${s.ph[0]}–${s.ph[1]})` : ''}.
       </p>
 
       <div>
-        <h3>Calendrier chez vous</h3>
+        <h3>Quand semer, planter, récolter chez vous</h3>
         <MonthGrid
           rows={[
-            { label: 'Semis abrité', months: cal.semisAbri, kind: 'abri' },
-            { label: 'Semis en place', months: cal.semisPleineTerre },
+            { label: 'Semis à l’abri', months: cal.semisAbri, kind: 'abri' },
+            { label: 'Semis en pleine terre', months: cal.semisPleineTerre },
             { label: 'Plantation', months: cal.plantation, kind: 'plant' },
             { label: 'Récolte', months: cal.recolte, kind: 'harvest' },
           ]}
@@ -81,7 +99,7 @@ export function SpeciesSheet({ species: s, garden }: { species: Species; garden:
       </div>
 
       <div>
-        <h3>Comment l'entretenir</h3>
+        <h3>Comment l’entretenir</h3>
         <p>{s.entretien}</p>
         <ul className="list small">
           {s.taches.map((t, i) => (
@@ -93,7 +111,7 @@ export function SpeciesSheet({ species: s, garden }: { species: Species; garden:
                 — {monthsLabel(t.months)}
                 {t.condition ? `, ${CONDITION_LABEL[t.condition]}` : ''}
                 {t.frequencyDays ? `, tous les ${t.frequencyDays} jours` : ''}
-                {t.minAgeYears ? `, à partir de ${t.minAgeYears} an(s)` : ''}
+                {t.minAgeYears ? `, dès ${t.minAgeYears} an${t.minAgeYears > 1 ? 's' : ''}` : ''}
               </span>
               <div>{t.howTo}</div>
               {t.tool && <div className="muted">Outil : {t.tool}</div>}
@@ -104,11 +122,11 @@ export function SpeciesSheet({ species: s, garden }: { species: Species; garden:
 
       {(s.compagnons.length > 0 || s.antagonistes.length > 0 || s.fonctions?.length) && (
         <div className="small">
-          <h3>En permaculture</h3>
-          {s.fonctions?.length ? <p>Rôles : {s.fonctions.join(', ')}.</p> : null}
+          <h3>Voisinage</h3>
+          {s.fonctions?.length ? <p>À quoi elle sert : {s.fonctions.join(', ')}.</p> : null}
           {s.compagnons.length > 0 && (
             <p>
-              <span className="badge green">Bons voisins</span> <SpeciesLinks ids={s.compagnons} />
+              <strong>Bonnes plantes voisines :</strong> <SpeciesLinks ids={s.compagnons} />
             </p>
           )}
           {s.antagonistes.length > 0 && (
@@ -119,7 +137,7 @@ export function SpeciesSheet({ species: s, garden }: { species: Species; garden:
         </div>
       )}
 
-      <button className="btn primary" onClick={() => startPlacing(s.id)}>
+      <button className="btn primary" style={{ minHeight: 44 }} onClick={() => startPlacing(s.id)}>
         <Icon name="pin" /> Placer dans mon jardin
       </button>
     </div>

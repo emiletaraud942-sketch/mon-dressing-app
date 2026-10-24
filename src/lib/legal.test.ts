@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
-import { CGU, CONFIDENTIALITE, CONSENT_TEXT, DRAFT_BANNER, LEGAL_DOCS, LEGAL_FIELDS, MENTIONS, getMissingFields, toMarkdown } from './legal'
+import { CGU, CONFIDENTIALITE, CONSENT_TEXT, DRAFT_BANNER, LEGAL_DOCS, LEGAL_FIELDS, MENTIONS, getMissingFields, isLegalReady, legalText, toMarkdown, TO_COMPLETE } from './legal'
 
 const doc = (f: string) => readFileSync(new URL(`../../docs/${f}`, import.meta.url), 'utf8')
 
@@ -52,5 +52,13 @@ describe('documents', () => {
     expect(t).toContain('ré-encodée')
     expect(t).toContain('GPS')
     expect(t).toContain('pas conservée')
+  })
+
+  it('masque « [à compléter] » à l’affichage et tant que des champs manquent', () => {
+    expect(legalText(`Éditeur : ${TO_COMPLETE}.`)).toBe('Éditeur : information à venir.')
+    expect(legalText(`Éditeur : ${TO_COMPLETE}.`)).not.toMatch(/\[|à compléter/)
+    expect(isLegalReady()).toBe(getMissingFields().length === 0)
+    expect(isLegalReady({ EDITEUR_NOM: 'Association X' })).toBe(true)
+    expect(isLegalReady({ EDITEUR_NOM: TO_COMPLETE })).toBe(false)
   })
 })

@@ -44,7 +44,7 @@ export function ThreadList({ online, onOpen }: { online: boolean; onOpen: (t: Th
           </li>
         ))}
       </ul>
-      {!online && <p className="small muted">Hors ligne : la liste affichée peut être dépassée.</p>}
+      {!online && <p className="small muted">Pas de réseau : la liste peut être dépassée.</p>}
     </div>
   )
 }
@@ -92,15 +92,15 @@ export function ThreadView({ thread, postTitle, online, onBack }: { thread: Thre
         ‹ Retour
       </button>
       <div className="card stack">
+        <h2 style={{ margin: 0 }}>
+          <bdi>{thread.otherPseudo}</bdi>
+        </h2>
         <div className="row">
-          <h2 style={{ margin: 0, flex: 1 }}>
-            <bdi>{thread.otherPseudo}</bdi>
-          </h2>
           <button className="btn small tall" onClick={() => setDialog({ k: 'report-person' })}>
             Signaler
           </button>
           <button className="btn small tall danger" onClick={() => setDialog({ k: 'block' })}>
-            Bloquer
+            Ne plus voir cette personne
           </button>
         </div>
         {postTitle && <p className="small muted" style={{ margin: 0 }}>À propos de : <bdi>{postTitle}</bdi></p>}
@@ -151,17 +151,17 @@ export function ThreadView({ thread, postTitle, online, onBack }: { thread: Thre
       {dialog?.k === 'report-msg' && <ReportDialog target="message" targetId={dialog.id} what="ce message" onClose={() => setDialog(undefined)} />}
       {dialog?.k === 'block' && (
         <Confirm
-          title={`Bloquer ${thread.otherPseudo} ?`}
-          confirmLabel="Bloquer"
+          title={`Ne plus voir ${thread.otherPseudo} ?`}
+          confirmLabel="Ne plus voir cette personne"
           danger
           onClose={() => setDialog(undefined)}
           onConfirm={async () => {
             await blockUser(thread.otherId)
-            showToast({ message: `${thread.otherPseudo} est bloqué.` })
+            showToast({ message: `Vous ne verrez plus ${thread.otherPseudo}.` })
             onBack()
           }}
         >
-          <p style={{ margin: 0 }}>La conversation disparaît de votre liste et vous ne vous verrez plus. Vous pourrez le débloquer dans votre profil.</p>
+          <p style={{ margin: 0 }}>La conversation disparaît de votre liste. Vous pourrez changer d’avis dans l’onglet Profil.</p>
         </Confirm>
       )}
     </div>

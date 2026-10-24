@@ -4,7 +4,7 @@ import { isEmailLike } from '../../lib/neighbors/logic'
 import { ErrorBox } from './common'
 import { errorText } from './hooks'
 
-/** Connexion par lien magique. Le lien doit être ouvert dans le même navigateur. */
+/** Connexion par lien reçu par e-mail. Le lien doit être ouvert sur cet appareil, dans le même programme internet. */
 export function SignIn({ online }: { online: boolean }) {
   const [email, setEmail] = useState('')
   const [busy, setBusy] = useState(false)
@@ -27,15 +27,15 @@ export function SignIn({ online }: { online: boolean }) {
   if (sentTo) {
     return (
       <div className="card stack">
-        <h2>Vérifiez votre messagerie</h2>
+        <h2>Regardez vos e-mails</h2>
         <p style={{ margin: 0 }}>
-          Un lien de connexion a été envoyé à <strong>{sentTo}</strong>.
+          Nous avons envoyé un lien à <strong>{sentTo}</strong>.
         </p>
         <p className="alert info small" style={{ margin: 0 }}>
-          Ouvrez le lien <strong>dans ce navigateur</strong>, sur cet appareil. Dans un autre navigateur, la connexion échoue.
+          Ouvrez le lien <strong>sur ce téléphone</strong> (ou cet ordinateur), avec le même programme internet. Sinon, la connexion échoue.
         </p>
         <p className="small muted" style={{ margin: 0 }}>
-          Rien reçu ? Regardez les courriers indésirables, puis renvoyez le lien.
+          Rien reçu ? Regardez dans les courriers indésirables, puis renvoyez le lien.
         </p>
         {error && <ErrorBox message={error} />}
         <div className="row">
@@ -57,19 +57,19 @@ export function SignIn({ online }: { online: boolean }) {
         if (isEmailLike(email) && !busy) void send()
       }}
     >
-      <h2>Connexion</h2>
-      <p style={{ margin: 0 }}>Pas de mot de passe : vous recevez un lien par e-mail. Votre adresse reste privée, les voisins ne voient que votre pseudo.</p>
+      <h2>Votre adresse e-mail</h2>
+      <p style={{ margin: 0 }}>Pas de mot de passe : vous recevez un lien par e-mail. Les voisins ne voient jamais votre adresse.</p>
       <label className="field">
         <span>Adresse e-mail</span>
         <input className="input" type="email" inputMode="email" autoComplete="email" placeholder="votre@email.fr" value={email} onChange={(e) => setEmail(e.target.value)} />
       </label>
       {error && <ErrorBox message={error} />}
-      {!online && <p className="small warn-text" style={{ margin: 0 }}>Vous êtes hors ligne. Reconnectez-vous pour recevoir le lien.</p>}
+      {!online && <p className="small warn-text" style={{ margin: 0 }}>Pas de réseau. Reconnectez-vous pour recevoir le lien.</p>}
       <button className="btn primary" type="submit" disabled={busy || !online || !isEmailLike(email)}>
         {busy && <span className="spinner" />} Recevoir un lien de connexion
       </button>
       <p className="small muted" style={{ margin: 0 }}>
-        Ouvrez ensuite le lien dans ce navigateur, sur cet appareil.
+        Ouvrez ensuite le lien sur ce téléphone, avec le même programme internet.
       </p>
     </form>
   )

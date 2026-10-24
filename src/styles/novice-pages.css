@@ -1,0 +1,229 @@
+/* Pages simplifiées : Entretien, Où planter ?, Catalogue, Entraide. Couleurs : variables de :root uniquement. */
+.np-page .btn,
+.np-page .btn.small,
+.np-page .btn.small.tall {
+  min-height: 44px;
+}
+.np-page .row {
+  gap: 8px;
+}
+.np-page h1,
+.np-page h2,
+.np-page h3,
+.np-page p,
+.np-page li {
+  overflow-wrap: anywhere;
+}
+.np-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.np-details > summary {
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+  color: var(--accent);
+  font-weight: 600;
+}
+.np-details > summary:focus-visible {
+  outline: 3px solid var(--accent-2);
+  outline-offset: 2px;
+}
+.np-done {
+  min-width: 96px;
+  font-weight: 600;
+}
+.np-task-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+  align-items: center;
+}
+.np-weather {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(72px, 1fr));
+  gap: 6px;
+}
+.np-weather .d {
+  text-align: center;
+  padding: 6px 4px;
+  border-radius: 8px;
+  background: var(--surface-2);
+}
+.np-weather .d.frost {
+  background: var(--warn-soft);
+  color: var(--warn-text);
+}
+.np-steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.np-steps li {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+}
+.np-num {
+  flex: none;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: var(--surface);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+}
+.np-reco {
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+}
+.np-fit {
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 8px;
+  background: var(--surface-2);
+}
+.np-fit.green {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.np-fit.danger {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+/* Calendrier des mois : vraie table, symboles en plus des couleurs. */
+.mg-wrap {
+  overflow-x: auto;
+}
+.mg-table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 2px;
+  table-layout: fixed;
+  font-size: 0.8rem;
+}
+.mg-table th,
+.mg-table td {
+  padding: 0;
+  text-align: center;
+}
+.mg-table thead th {
+  color: var(--muted);
+  font-weight: 600;
+}
+.mg-table thead th.now {
+  color: var(--text);
+  border-bottom: 3px solid var(--text);
+}
+.mg-table tbody th {
+  text-align: left;
+  font-weight: 600;
+  width: 28%;
+  padding-right: 4px;
+  overflow-wrap: anywhere;
+}
+.mg-table td {
+  height: 28px;
+  background: var(--surface-2);
+  border-radius: 4px;
+  font-weight: 700;
+  line-height: 28px;
+}
+.mg-table td.now {
+  outline: 2px solid var(--text);
+  outline-offset: -1px;
+}
+.mg-table .s-abri {
+  color: var(--cal-abri);
+}
+.mg-table .s-default {
+  color: var(--accent-2);
+}
+.mg-table .s-plant {
+  color: var(--accent);
+}
+.mg-table .s-harvest {
+  color: var(--cal-harvest);
+}
+.mg-sym {
+  font-weight: 700;
+}
+.mg-summary {
+  margin: 8px 0 0;
+}
+.mg-summary li {
+  margin: 2px 0;
+}
+/* Catalogue */
+.np-facts {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 4px 12px;
+  margin: 0;
+}
+.np-facts dt {
+  color: var(--muted);
+}
+.np-facts dd {
+  margin: 0;
+  font-weight: 600;
+}
+.np-term {
+  display: block;
+  color: var(--muted);
+  font-size: 0.9rem;
+  font-weight: 400;
+}
+/* Entraide */
+.np-example {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px;
+  border: 1px dashed var(--border-strong, var(--border));
+  border-radius: 12px;
+  background: var(--surface);
+}
+.np-photo-btn {
+  cursor: pointer;
+}
+.np-photo-btn:focus-within {
+  outline: 3px solid var(--accent-2);
+  outline-offset: 2px;
+}
+.np-recap {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 6px 12px;
+  margin: 0;
+}
+.np-recap dt {
+  color: var(--muted);
+}
+.np-recap dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+@media (max-width: 420px) {
+  .np-facts,
+  .np-recap {
+    grid-template-columns: 1fr;
+  }
+  .np-recap dd,
+  .np-facts dd {
+    margin-bottom: 6px;
+  }
+}
+.consent-actions .btn,
+.nb-radio {
+  min-height: 44px;
+}

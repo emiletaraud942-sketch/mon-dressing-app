@@ -35,8 +35,8 @@ export function Modal({ title, onClose, children, sheet }: { title: string; onCl
     >
       <div className="modal-head">
         <h2 id={titleId}>{title}</h2>
-        <button className="btn ghost small icon-btn" onClick={() => ref.current?.close()} aria-label="Fermer">
-          <Icon name="x" />
+        <button className="btn ghost small close-btn" onClick={() => ref.current?.close()}>
+          <Icon name="x" size={18} /> Fermer
         </button>
       </div>
       <div className="modal-body">{children}</div>

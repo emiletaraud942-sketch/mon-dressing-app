@@ -7,7 +7,7 @@ import { useProgress } from './useProgress'
 import type { Garden } from '../types'
 
 /**
- * Jauge « Jardin modélisé » en haut de « Mon jardin ». Une ligne ; elle déplie (par-dessus l'écran, sans le redimensionner)
+ * Jauge « Mon jardin : 3 étapes sur 5 » en haut de « Mon jardin ». Une ligne ; elle déplie (par-dessus l'écran, sans le redimensionner)
  * la prochaine étape et la checklist « Premiers pas ». Propose discrètement de passer à l'entretien quand le jardin est prêt.
  */
 export function ProgressCard({ garden }: { garden: Garden }) {
@@ -18,7 +18,7 @@ export function ProgressCard({ garden }: { garden: Garden }) {
   return (
     <section
       className="progresscard"
-      aria-label="Avancement du jardin"
+      aria-label="Avancement de votre jardin"
       onKeyDown={(e) => {
         if (e.key === 'Escape' && open) {
           e.stopPropagation()
@@ -27,19 +27,20 @@ export function ProgressCard({ garden }: { garden: Garden }) {
       }}
     >
       <button className="guide-toggle" aria-expanded={open} aria-controls="progress-body" onClick={() => setGuide({ progressOpen: !open })}>
-        <span className="gauge-label">Jardin modélisé</span>
-        <span className="gauge" role="progressbar" aria-label="Jardin modélisé" aria-valuemin={0} aria-valuemax={100} aria-valuenow={progress.percent}>
+        <span className="gauge-label">
+          Mon jardin : <strong>{progress.doneCount} étapes sur {progress.total}</strong>
+        </span>
+        <span className="gauge" role="progressbar" aria-label="Étapes faites" aria-valuemin={0} aria-valuemax={progress.total} aria-valuenow={progress.doneCount}>
           <span style={{ width: `${progress.percent}%` }} />
         </span>
-        <strong className="gauge-pct">{progress.percent} %</strong>
         <span className={'chev' + (open ? ' up' : '')} aria-hidden>
           <Icon name="chevron" size={18} />
         </span>
       </button>
       {nudge && (
         <div className="nudge" role="status">
-          <span className="small">Votre jardin est prêt à {progress.percent} % : passer à l’entretien ?</span>
-          <div className="row" style={{ gap: 6 }}>
+          <span className="small">Votre jardin est bien avancé. Passer à l’entretien ?</span>
+          <div className="row">
             <button className="btn small primary" onClick={() => setMode('entretenir')}>
               Entretenir
             </button>
@@ -54,13 +55,13 @@ export function ProgressCard({ garden }: { garden: Garden }) {
           {progress.next ? (
             <div className="next-step">
               <span className="small">
-                <span className="muted">Prochaine étape :</span> {progress.next.label}
+                <span className="muted">Prochaine étape :</span> <strong>{progress.next.label}</strong>
               </span>
               <StepButton step={progress.next} garden={garden} />
             </div>
           ) : (
-            <p className="small" style={{ margin: 0 }}>
-              Tout est modélisé. Bravo !
+            <p style={{ margin: 0 }}>
+              Toutes les étapes sont faites. Bravo !
             </p>
           )}
           <FirstSteps garden={garden} />

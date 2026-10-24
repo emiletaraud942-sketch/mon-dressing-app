@@ -88,12 +88,12 @@ export function PostDetail({ post, online, onBack, onChat }: { post: Post; onlin
               Signaler
             </button>
             <button className="btn danger" onClick={() => setDialog({ k: 'block', id: post.authorId, pseudo: post.authorPseudo })}>
-              Bloquer <bdi>{post.authorPseudo}</bdi>
+              Ne plus voir cette personne
             </button>
           </div>
         ) : (
           <p className="small muted" style={{ margin: 0 }}>
-            C’est votre annonce. Terminez-la ou supprimez-la dans « Mes annonces ».
+            C’est votre annonce. Terminez-la ou supprimez-la dans l’onglet « Mes annonces ».
           </p>
         )}
       </article>
@@ -119,7 +119,7 @@ export function PostDetail({ post, online, onBack, onChat }: { post: Post; onlin
                   )}
                   {!r.mine && (
                     <button className="btn small tall danger" onClick={() => setDialog({ k: 'block', id: r.authorId, pseudo: r.authorPseudo })}>
-                      Bloquer
+                      Ne plus voir cette personne
                     </button>
                   )}
                   {(r.mine || post.mine) && (
@@ -141,7 +141,7 @@ export function PostDetail({ post, online, onBack, onChat }: { post: Post; onlin
             />
           ) : (
             <p className="small muted" style={{ margin: 0 }}>
-              Cette question est fermée : plus de réponse possible.
+              Cette question est terminée. On ne peut plus répondre.
             </p>
           )}
         </section>
@@ -151,17 +151,17 @@ export function PostDetail({ post, online, onBack, onChat }: { post: Post; onlin
       {dialog?.k === 'report-reply' && <ReportDialog target="reply" targetId={dialog.reply.id} what="cette réponse" onClose={() => setDialog(undefined)} />}
       {dialog?.k === 'block' && (
         <Confirm
-          title={`Bloquer ${dialog.pseudo} ?`}
-          confirmLabel="Bloquer"
+          title={`Ne plus voir ${dialog.pseudo} ?`}
+          confirmLabel="Ne plus voir cette personne"
           danger
           onClose={() => setDialog(undefined)}
           onConfirm={async () => {
             await blockUser(dialog.id)
-            showToast({ message: `${dialog.pseudo} est bloqué.` })
+            showToast({ message: `Vous ne verrez plus ${dialog.pseudo}.` })
             onBack()
           }}
         >
-          <p style={{ margin: 0 }}>Vous ne verrez plus ses annonces, réponses ni messages, et il ne verra plus les vôtres. Vous pourrez le débloquer dans votre profil.</p>
+          <p style={{ margin: 0 }}>Vous ne verrez plus ses annonces ni ses messages, et elle ne verra plus les vôtres. Vous pourrez changer d’avis dans l’onglet Profil.</p>
         </Confirm>
       )}
       {dialog?.k === 'delete-reply' && (
