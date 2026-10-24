@@ -216,4 +216,6 @@ export interface GeneratedTask {
   reason: string
   /** Faisable aujourd'hui selon la météo ? Sinon, raison du report. */
   blockedBy?: string
+  /** Détail chiffré (météo) à afficher en option ; `reason` et `blockedBy` restent en langage simple. */
+  detail?: string
 }

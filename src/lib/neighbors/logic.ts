@@ -24,10 +24,10 @@ export function parseRadius(v: unknown): number {
 // ---------- Règles de conduite (affichées à la 1re publication) ----------
 
 export const CONDUCT_RULES: string[] = [
-  'Respect : restez courtois. Pas d’insultes, de harcèlement ni de discrimination.',
-  'Rien ne se vend : dons, échanges, prêts et questions seulement. Pas de publicité.',
-  'Aucune donnée personnelle dans les annonces : pas d’adresse, de téléphone ni d’e-mail. Utilisez la messagerie privée.',
-  'Plantes sûres : signalez les plantes toxiques ou invasives, ne proposez rien de dangereux.',
+  'Soyez poli. Pas d’insultes ni de harcèlement.',
+  'Rien ne se vend : dons, échanges, prêts et questions seulement.',
+  'Ne donnez ni adresse, ni téléphone, ni e-mail dans une annonce. Utilisez les messages privés.',
+  'Signalez les plantes toxiques ou envahissantes. Ne proposez rien de dangereux.',
 ]
 
 // ---------- Dates ----------
@@ -67,18 +67,18 @@ export interface StatusInfo {
 }
 
 export function postStatusInfo(p: Pick<Post, 'status' | 'expiresAt'>, now: Date = new Date()): StatusInfo {
-  if (p.status === 'hidden') return { label: 'Masquée après signalements', tone: 'danger', canClose: false, canReopen: false }
+  if (p.status === 'hidden') return { label: 'Cachée après plusieurs signalements', tone: 'danger', canClose: false, canReopen: false }
   if (p.status === 'closed') return { label: 'Terminée', tone: 'neutral', canClose: false, canReopen: true }
   if (Date.parse(p.expiresAt) <= now.getTime()) return { label: 'Expirée', tone: 'warn', canClose: false, canReopen: false }
   const d = daysLeft(p.expiresAt, now)
-  return { label: `Ouverte · encore ${d} j`, tone: 'green', canClose: true, canReopen: false }
+  return { label: `En ligne · encore ${d} ${d > 1 ? 'jours' : 'jour'}`, tone: 'green', canClose: true, canReopen: false }
 }
 
 // ---------- Quartier ----------
 
 export interface CellPreview {
   cell: Cell
-  /** Ex. « 47.22° N, 2.07° E ». */
+  /** Ex. « 47.22° N, 2.07° E ». Pour les tests et le diagnostic : jamais montré à l'utilisateur. */
   text: string
 }
 
@@ -90,6 +90,49 @@ export function cellPreview(lat: number, lon: number): CellPreview {
 
 export function describeCell(c: Cell): string {
   return `${Math.abs(c.lat).toFixed(2)}° ${c.lat >= 0 ? 'N' : 'S'}, ${Math.abs(c.lon).toFixed(2)}° ${c.lon >= 0 ? 'E' : 'O'}`
+}
+
+export const AROUND_GARDEN = 'autour de votre jardin'
+
+/**
+ * Nom de la commune d'après une adresse française (« 8 Boulevard du Port 80000 Amiens » → « Amiens »).
+ * C'est le texte après le code postal. Sans code postal : undefined (aucun appel réseau, aucune devinette).
+ */
+export function communeFromAddress(address: string | undefined | null): string | undefined {
+  if (!address) return undefined
+  const m = /\b\d{5}\s+([^,\d][^,]*)/.exec(address)
+  if (!m) return undefined
+  const name = m[1]
+    .replace(/\s+cedex(\s+\d+)?\s*$/i, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+  if (name.length < 2) return undefined
+  return name.length > 40 ? name.slice(0, 39).trimEnd() + '…' : name
+}
+
+/**
+ * Texte du quartier, sans degrés. Le nom de commune n'est donné que si le quartier enregistré
+ * est bien celui du jardin actif ; sinon on reste prudent.
+ */
+export function neighborhoodText(cell: Cell, garden: { address?: string; center: { lat: number; lon: number } } | undefined): string {
+  if (!garden) return 'autour du jardin choisi à l’inscription'
+  const same = (() => {
+    try {
+      const c = roundCell(garden.center.lat, garden.center.lon)
+      return c.lat === cell.lat && c.lon === cell.lon
+    } catch {
+      return false
+    }
+  })()
+  if (!same) return 'autour du jardin choisi à l’inscription'
+  const commune = communeFromAddress(garden.address)
+  return commune ? `commune de ${commune}` : AROUND_GARDEN
+}
+
+/** Même chose pour un point pas encore enregistré (centre du jardin actif). */
+export function gardenNeighborhoodText(garden: { address?: string }): string {
+  const commune = communeFromAddress(garden.address)
+  return commune ? `commune de ${commune}` : AROUND_GARDEN
 }
 
 // ---------- Divers ----------

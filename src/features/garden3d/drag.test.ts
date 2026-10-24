@@ -1,8 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import * as THREE from 'three'
-import { groundPointOnRay, ownerIndex, translatedMatrix } from './drag'
+import { dragThresholdPx, groundPointOnRay, ownerIndex, translatedMatrix } from './drag'
 
 describe('glisser une plante : mises à jour ciblées', () => {
+  it('seuil de glisser : 12 px au doigt, 6 px à la souris', () => {
+    expect(dragThresholdPx(true)).toBe(12)
+    expect(dragThresholdPx(false)).toBe(6)
+  })
+
   it('ownerIndex regroupe les indices d’instances par plante', () => {
     const idx = ownerIndex([{ owner: 'a' }, { owner: 'b' }, { owner: 'a' }, { owner: 'c' }, { owner: 'a' }])
     expect(idx.get('a')).toEqual([0, 2, 4])

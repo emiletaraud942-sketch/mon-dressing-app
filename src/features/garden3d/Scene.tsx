@@ -10,7 +10,7 @@ import { buildPlantScene } from './plantModel'
 import { makeHeightSampler } from './terrain'
 import type { SunState } from './sun'
 import { fitOrtho, fitPerspective, orthoPixels, viewResetToken, walkResetToken, type Frame, type Insets, type ViewMode } from './framing'
-import { groundPointOnRay } from './drag'
+import { dragThresholdPx, groundPointOnRay } from './drag'
 import { DEBUG_3D } from './debug'
 import { makeColliders, type DetailLevel, type WalkShared } from './walk'
 import { WalkRig } from './Walk'
@@ -51,13 +51,14 @@ export interface SceneProps {
 
 type OrbitControlsImpl = ComponentRef<typeof OrbitControls>
 
-const DRAG_THRESHOLD_PX = 6
 const TOP_MOUSE = { LEFT: THREE.MOUSE.PAN, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.PAN }
 const TOP_TOUCH = { ONE: THREE.TOUCH.PAN, TWO: THREE.TOUCH.DOLLY_PAN }
 
 // ---------- Soleil, ciel, ambiance ----------
 
 const COARSE_POINTER = typeof window !== 'undefined' && !!window.matchMedia?.('(pointer: coarse)').matches
+/** Seuil de glisser d'une plante : 12 px en tactile, 6 px à la souris. */
+const DRAG_THRESHOLD_PX = dragThresholdPx(COARSE_POINTER)
 
 function SunAndSky({ sun, halfSizeM, walking }: { sun: SunState; halfSizeM: number; walking: boolean }) {
   const scene = useThree((s) => s.scene)

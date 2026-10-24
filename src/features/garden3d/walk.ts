@@ -302,6 +302,8 @@ export interface WalkShared {
   eyeY: number
   /** Joystick virtuel : x vers la droite, y vers l'avant, chacun dans [-1, 1]. */
   joy: { x: number; y: number }
+  /** Boutons fléchés tactiles : x = pas de côté, y = avancer, turn = tourner (> 0 = vers la gauche), chacun dans [-1, 1]. */
+  pad: { x: number; y: number; turn: number }
   /** Bouton « Courir » tactile. */
   run: boolean
   /** Demande une image (rendu à la demande) : posé par WalkRig, appelé par le joystick et « Courir ». */
@@ -311,7 +313,7 @@ export interface WalkShared {
 }
 
 export function createWalkShared(): WalkShared {
-  return { pose: { x: 0, y: 0, yaw: 0, pitch: 0 }, eyeY: EYE_HEIGHT_M, joy: { x: 0, y: 0 }, run: false, saved: false }
+  return { pose: { x: 0, y: 0, yaw: 0, pitch: 0 }, eyeY: EYE_HEIGHT_M, joy: { x: 0, y: 0 }, pad: { x: 0, y: 0, turn: 0 }, run: false, saved: false }
 }
 
 // ---------- Clavier : quelles touches marchent ----------

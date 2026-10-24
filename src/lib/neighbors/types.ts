@@ -2,7 +2,7 @@
 
 export type PostKind = 'don' | 'echange' | 'pret' | 'question'
 export const POST_KINDS: readonly PostKind[] = ['don', 'echange', 'pret', 'question']
-export const POST_KIND_LABELS: Record<PostKind, string> = { don: 'Don', echange: 'Échange', pret: 'Prêt', question: 'Question' }
+export const POST_KIND_LABELS: Record<PostKind, string> = { don: 'Je donne', echange: 'J’échange', pret: 'Je prête', question: 'Je pose une question' }
 
 /** `hidden` = masquée par la modération (visible de son seul auteur). */
 export type PostStatus = 'open' | 'closed' | 'hidden'
@@ -110,11 +110,11 @@ export interface Message {
 export type ReportTarget = 'post' | 'reply' | 'profile' | 'message'
 export type ReportReason = 'spam' | 'abus' | 'dangereux' | 'commerce' | 'autre'
 export const REPORT_REASONS: Record<ReportReason, string> = {
-  spam: 'Publicité ou spam',
-  abus: 'Propos injurieux ou harcèlement',
-  dangereux: 'Produit ou conseil dangereux',
-  commerce: 'Vente (l’entraide est gratuite)',
-  autre: 'Autre',
+  spam: 'Publicité ou messages indésirables',
+  abus: 'Insultes ou harcèlement',
+  dangereux: 'Plante ou conseil dangereux',
+  commerce: 'On me vend quelque chose',
+  autre: 'Autre chose',
 }
 
 export interface BlockedUser {

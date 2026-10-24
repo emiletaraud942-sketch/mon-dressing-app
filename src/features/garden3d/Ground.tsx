@@ -174,9 +174,10 @@ export interface SunHeatmap {
 }
 
 const RAMP: [number, THREE.Color][] = [
-  [0, new THREE.Color('#2c4f9e')],
-  [0.5, new THREE.Color('#f5d547')],
-  [1, new THREE.Color('#ef7d1f')],
+  // Du plus sombre (peu de soleil) au plus clair (beaucoup de soleil) : la légende le dit en toutes lettres.
+  [0, new THREE.Color('#1f3a7a')],
+  [0.5, new THREE.Color('#e0902a')],
+  [1, new THREE.Color('#fff4b8')],
 ]
 
 export function rampColor(t: number, out = new THREE.Color()): THREE.Color {

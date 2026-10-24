@@ -219,7 +219,7 @@ describe('generateTasks : regroupement et clés', () => {
     expect(taille[0].tool).toBe('sécateur')
     // Fenêtre décembre → mars commencée en 2025.
     expect(taille[0].key).toMatch(/^2025:pommier:taille:m1\.2\.3\.12\+hors-gel:[0-9a-z]{4}(\.[0-9a-z]{4})*$/)
-    expect(taille[0].reason).toBe('Fenêtre de taille : décembre à mars, hors gel.')
+    expect(taille[0].reason).toBe("Bonne période pour tailler : de décembre à mars. À faire seulement s'il ne gèle pas.")
   })
 
   it('minAgeYears : la taille de fructification exclut le jeune pommier', () => {
@@ -281,7 +281,8 @@ describe('generateTasks : météo', () => {
     const w = weather(today, [], [{ tMin: 2 }, { tMin: 1 }, { tMin: -2.3 }])
     const tasks = run({ plants: [plant('pommier'), plant('citronnier')], weather: w, today })
     const taille = tasks.find(tailleHiver)!
-    expect(taille.blockedBy).toBe('Gel prévu jeudi (-2 °C) : attendre')
+    expect(taille.blockedBy).toBe('Attendre : risque de gel')
+    expect(taille.detail).toContain('Gel prévu jeudi (-2 °C)')
     const prot = tasks.find((t) => t.type === 'protection')!
     expect(prot.priority).toBe('haute')
     expect(prot.plantIds).toHaveLength(1) // le pommier supporte -25 °C
@@ -304,13 +305,14 @@ describe('generateTasks : météo', () => {
     expect(humide[0].priority).toBe('haute')
     const sec = run({ plants: [plant('laitue')], today, weather: weather(today, [{ rainMm: 10 }], []) })
     expect(sec[0].priority).toBe('normale')
-    expect(sec[0].reason).toContain('Sol sec, désherbage plus difficile')
+    expect(sec[0].reason).toContain('Le sol est sec : désherbage plus difficile')
   })
 
   it('temps-sec : bloquée si pluie prévue sous 48 h', () => {
     const today = new Date(2026, 7, 20, 9)
     const pluie = run({ plants: [plant('lavande')], today, weather: weather(today, [], [{}, { rainMm: 4 }]) })
-    expect(pluie[0].blockedBy).toMatch(/Pluie prévue sous 48 h/)
+    expect(pluie[0].blockedBy).toBe('Attendre : pluie prévue')
+    expect(pluie[0].detail).toMatch(/Pluie prévue sous 48 h/)
     const sec = run({ plants: [plant('lavande')], today, weather: weather(today, [], [{}, {}, { rainMm: 8 }]) })
     expect(sec[0].blockedBy).toBeUndefined()
   })
@@ -320,7 +322,8 @@ describe('generateTasks : météo', () => {
     const frais = run({ plants: [plant('tomate')], today, weather: weather(today, [{ rainMm: 5 }], []) })
     expect(frais.find((t) => t.type === 'paillage')).toBeUndefined()
     const chaud = run({ plants: [plant('tomate')], today, weather: weather(today, [{ rainMm: 5 }], [{}, { tMax: 31 }]) })
-    expect(chaud.find((t) => t.type === 'paillage')?.reason).toContain('31 °C prévus demain')
+    expect(chaud.find((t) => t.type === 'paillage')?.reason).toContain('Chaleur prévue demain')
+    expect(chaud.find((t) => t.type === 'paillage')?.detail).toContain('31 °C prévus demain')
   })
 
   it('déficit hydrique : arrosage haute priorité des plantes concernées', () => {
@@ -337,7 +340,8 @@ describe('generateTasks : météo', () => {
     const arrosage = tasks.filter((x) => x.type === 'arrosage')
     expect(arrosage).toHaveLength(1) // la règle d'arrosage de la tomate est fusionnée
     expect(arrosage[0].priority).toBe('haute')
-    expect(arrosage[0].reason).toContain('Déficit de 26 mm sur 7 jours')
+    expect(arrosage[0].reason).toContain('Pas assez de pluie ces 7 derniers jours')
+    expect(arrosage[0].detail).toContain('Déficit en eau : 26 mm sur 7 jours')
     // Le pommier de 6 ans est établi : il n'est plus compté dans l'arrosage météo.
     expect(new Set(arrosage[0].plantIds)).toEqual(new Set([t.id, jeuneLavande.id]))
     expect(tasks[0]).toBe(arrosage[0])
@@ -350,7 +354,10 @@ describe('generateTasks : météo', () => {
     const tasks = run({ plants: [plant('tomate')], today, weather: w })
     const arrosage = tasks.filter((x) => x.type === 'arrosage')
     expect(arrosage.length).toBeGreaterThan(0)
-    for (const a of arrosage) expect(a.blockedBy).toMatch(/Pluie abondante prévue \(12 mm sous 3 jours\)/)
+    for (const a of arrosage) {
+      expect(a.blockedBy).toBe('Attendre : pluie prévue')
+      expect(a.detail).toContain('Pluie prévue sous 3 jours : 12 mm')
+    }
   })
 
   it('pas de déficit : l’arrosage météo n’est pas proposé', () => {
@@ -447,7 +454,7 @@ describe('récolte implicite depuis le calendrier (L3)', () => {
     const t = run({ plants: [plant('pommier'), plant('pommier')], today: oct }).find((x) => x.type === 'recolte')!
     expect(t).toBeDefined()
     expect(t.title).toBe('Récolter les pommiers (2)')
-    expect(t.reason).toBe('Fenêtre de récolte : septembre à octobre, tous les 7 jours.')
+    expect(t.reason).toBe('Bonne période pour récolter : septembre et octobre. À refaire tous les 7 jours.')
     expect(t.howTo).toBe('Cueillez à maturité, de préférence le matin ; ne laissez pas les fruits mûrs sur la plante.')
     expect(t.priority).toBe('normale')
     expect(t.key.startsWith(`${weekKey(oct)}:pommier:recolte:cal-recolte:`)).toBe(true)
@@ -474,7 +481,7 @@ describe('récolte implicite depuis le calendrier (L3)', () => {
   it('annuelle (basilic) : récolte dès la plantation, une fois par semaine', () => {
     const t = run({ plants: [plant('basilic', { plantedAt: '2026-09-20' })], today: new Date(2026, 8, 25, 9) }).filter((x) => x.type === 'recolte')
     expect(t).toHaveLength(1)
-    expect(t[0].reason).toBe('Fenêtre de récolte : juin à septembre, tous les 7 jours.')
+    expect(t[0].reason).toBe('Bonne période pour récolter : de juin à septembre. À refaire tous les 7 jours.')
   })
 
   it('la récolte implicite suit les premières gelées locales pour les espèces gélives', () => {
@@ -496,9 +503,9 @@ describe('arrosage : arbres établis (L2)', () => {
 
   it('maxAgeYears : la règle ne s’applique plus au-delà', () => {
     const jeune = arrosages([plant('cerisier', { plantedAt: '2025-04-01' })], weather(today, [{ rainMm: 30 }], []))
-    expect(jeune.some((t) => t.reason.includes('juin à août'))).toBe(true)
+    expect(jeune.some((t) => t.reason.includes('de juin à août'))).toBe(true)
     const adulte = arrosages([plant('cerisier', { plantedAt: '2018-04-01' })], weather(today, [{ rainMm: 30 }], []))
-    expect(adulte.some((t) => t.reason.includes('juin à août'))).toBe(false)
+    expect(adulte.some((t) => t.reason.includes('de juin à août'))).toBe(false)
   })
 
   it('un arbre adulte n’entre plus dans l’arrosage météo et n’obtient jamais la priorité haute', () => {
@@ -668,8 +675,8 @@ describe('condition « après la récolte »', () => {
     run({ plants: [plant(id)], today: day }).find((t) => t.type === 'taille')!
 
   it('bloquée pendant les mois de récolte', () => {
-    expect(taille('framboisier', new Date(2026, 7, 10, 9)).blockedBy).toBe("Récolte en cours (jusqu'en août) : attendre la fin")
-    expect(taille('framboisier', new Date(2026, 6, 5, 9)).blockedBy).toMatch(/Récolte en cours/)
+    expect(taille('framboisier', new Date(2026, 7, 10, 9)).blockedBy).toBe('Attendre : la récolte est en cours')
+    expect(taille('framboisier', new Date(2026, 6, 5, 9)).blockedBy).toBe('Attendre : la récolte est en cours')
   })
 
   it('possible dès la fin des mois de récolte', () => {
@@ -679,7 +686,7 @@ describe('condition « après la récolte »', () => {
   it('règle : faisable si le mois est dans `months` et hors des mois de récolte', () => {
     // Cassissier : fenêtre juin-septembre, récolte juillet-août.
     expect(taille('cassissier', new Date(2026, 5, 10, 9)).blockedBy).toBeUndefined()
-    expect(taille('cassissier', new Date(2026, 6, 10, 9)).blockedBy).toMatch(/Récolte en cours/)
+    expect(taille('cassissier', new Date(2026, 6, 10, 9)).blockedBy).toBe('Attendre : la récolte est en cours')
     expect(taille('cassissier', new Date(2026, 8, 10, 9)).blockedBy).toBeUndefined()
   })
 
@@ -695,7 +702,8 @@ describe('règles explicites de semis / plantation et dernières gelées', () =>
 
   it('plantation de tomate en mai alors que les gelées vont jusqu’au 20 mai : bloquée', () => {
     const t = plantation(tardif, new Date(2026, 4, 10, 9))!
-    expect(t.blockedBy).toBe('Dernières gelées vers le 20 mai : attendre juin')
+    expect(t.blockedBy).toBe('Attendre : risque de gel au printemps')
+    expect(t.detail).toBe('Dernières gelées vers le 20 mai : attendez juin.')
   })
 
   it('décalée : la tâche est proposée en juin, sans blocage', () => {
@@ -714,7 +722,7 @@ describe('règles explicites de semis / plantation et dernières gelées', () =>
 
   it('semis sous abri en mars non bloqué, semis en pleine terre en mai bloqué', () => {
     expect(plantation(tardif, new Date(2026, 2, 10, 9), 'piment')!.blockedBy).toBeUndefined()
-    expect(plantation(tardif, new Date(2026, 4, 10, 9), 'piment')!.blockedBy).toMatch(/Dernières gelées vers le 20 mai/)
+    expect(plantation(tardif, new Date(2026, 4, 10, 9), 'piment')!.blockedBy).toBe('Attendre : risque de gel au printemps')
   })
 })
 
@@ -807,5 +815,51 @@ describe('dates locales (fuseau Europe/Paris)', () => {
     // Fenêtre décembre → mars : au 1er janvier 00 h 30, la saison a commencé l'année précédente.
     const t = run({ plants: [plant('pommier')], today: new Date(2026, 0, 1, 0, 30) }).find(tailleHiver)!
     expect(t.key.startsWith('2025:')).toBe(true)
+  })
+})
+
+describe('generateTasks : langage clair', () => {
+  const sentences = (text: string) => text.split(/[.!?]+/).map((x) => x.trim()).filter(Boolean)
+  const words = (text: string) => text.split(/\s+/).filter(Boolean).length
+
+  it('reason, blockedBy et detail : phrases de 20 mots maximum, sans jargon', () => {
+    const all: ReturnType<typeof run> = []
+    const mois = [0, 2, 4, 5, 6, 7, 8, 9, 11]
+    const meteos = (d: Date) => [
+      undefined,
+      weather(d, [], []),
+      weather(d, [], [{ tMin: 2 }, { tMin: 1 }, { tMin: -3 }]),
+      weather(d, Array.from({ length: 7 }, () => ({ et0Mm: 4 })), [{ rainMm: 3 }, { rainMm: 9 }]),
+      weather(d, Array.from({ length: 7 }, () => ({ et0Mm: 4 })), [{ rainMm: 4 }, { tMax: 31 }]),
+      weather(d, [{}, {}, {}, {}, { rainMm: 1 }, { rainMm: 2 }, {}], [{ rainMm: 4 }]),
+      weather(d, [{ rainMm: 20 }], []),
+    ]
+    for (const m of mois) {
+      const today = new Date(2026, m, 15, 9)
+      for (const w of meteos(today)) {
+        all.push(
+          ...run({
+            plants: [
+              plant('pommier'), plant('citronnier'), plant('tomate'), plant('lavande'), plant('laitue'),
+              plant('lavande', { plantedAt: '2026-04-01' }), plant('tomate', { status: 'malade' }),
+            ],
+            today,
+            weather: w,
+          }),
+        )
+      }
+    }
+    expect(all.length).toBeGreaterThan(30)
+    expect(all.some((t) => t.blockedBy)).toBe(true)
+    expect(all.some((t) => t.detail)).toBe(true)
+    for (const t of all) {
+      for (const text of [t.reason, t.blockedBy, t.detail]) {
+        if (!text) continue
+        for (const s of sentences(text)) expect(words(s), `${t.key} : « ${s} »`).toBeLessThanOrEqual(20)
+      }
+      if (t.blockedBy) expect(t.blockedBy).toMatch(/^Attendre : /)
+      expect(t.reason).not.toMatch(/Fenêtre|Déficit|évaporation|\bmm\b/)
+      expect(t.blockedBy ?? '').not.toMatch(/\bmm\b|°C/)
+    }
   })
 })

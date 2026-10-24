@@ -249,9 +249,9 @@ export function WalkRig({ shared, parcel, bounds, colliders, sample, visuals, se
     const k = keys.current
     const { colliders: cols, bounds: b, sample: smp, visuals: vis } = live.current
     const inp = input.current
-    inp.forward = Math.max(-1, Math.min(1, (k.forward ? 1 : 0) - (k.back ? 1 : 0) + shared.joy.y))
-    inp.strafe = Math.max(-1, Math.min(1, (k.right ? 1 : 0) - (k.left ? 1 : 0) + shared.joy.x))
-    inp.turn = (k.turnLeft ? 1 : 0) - (k.turnRight ? 1 : 0)
+    inp.forward = Math.max(-1, Math.min(1, (k.forward ? 1 : 0) - (k.back ? 1 : 0) + shared.joy.y + shared.pad.y))
+    inp.strafe = Math.max(-1, Math.min(1, (k.right ? 1 : 0) - (k.left ? 1 : 0) + shared.joy.x + shared.pad.x))
+    inp.turn = Math.max(-1, Math.min(1, (k.turnLeft ? 1 : 0) - (k.turnRight ? 1 : 0) + shared.pad.turn))
     inp.run = k.shift || shared.run
     // Après un arrêt, la première image arrive longtemps après la précédente : pas de saut.
     const dt = wasActive.current ? delta : Math.min(delta, 1 / 30)

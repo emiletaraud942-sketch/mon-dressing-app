@@ -5,6 +5,11 @@ import * as THREE from 'three'
 import type { XY } from '../../types'
 import type { HeightSampler } from './terrain'
 
+/** Distance (px) à partir de laquelle un appui devient un glisser : 12 au doigt, 6 à la souris. */
+export function dragThresholdPx(coarse: boolean): number {
+  return coarse ? 12 : 6
+}
+
 /** Indices d'instances par plante, pour retrouver ses pièces dans un InstancedMesh. */
 export function ownerIndex(parts: { owner: string }[]): Map<string, number[]> {
   const m = new Map<string, number[]>()

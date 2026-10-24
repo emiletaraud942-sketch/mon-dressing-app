@@ -33,10 +33,11 @@ const TYPE_ORDER: TaskType[] = [
 ]
 const PRIORITY_ORDER = { haute: 0, normale: 1, basse: 2 } as const
 
-const TYPE_NOUN: Record<TaskType, string> = {
-  semis: 'semis', plantation: 'plantation', taille: 'taille', desherbage: 'désherbage',
-  arrosage: 'arrosage', paillage: 'paillage', recolte: 'récolte', fertilisation: 'fertilisation',
-  traitement: 'traitement', division: 'division', protection: 'protection', tuteurage: 'tuteurage',
+/** Verbe à l'infinitif, pour « Bonne période pour … ». */
+const TYPE_INFINITIVE: Record<TaskType, string> = {
+  semis: 'semer', plantation: 'planter', taille: 'tailler', desherbage: 'désherber',
+  arrosage: 'arroser', paillage: 'pailler', recolte: 'récolter', fertilisation: 'fertiliser',
+  traitement: 'traiter', division: 'diviser', protection: 'protéger', tuteurage: 'tuteurer',
 }
 
 /** Verbe + forme d'article : « les » → les X / votre X ; « des » → des X / de votre X. */
@@ -48,11 +49,11 @@ const TYPE_VERB: Record<TaskType, [string, 'les' | 'des']> = {
 }
 
 const CONDITION_LABEL: Record<TaskCondition, string> = {
-  'hors-gel': 'hors gel',
-  'apres-pluie': 'de préférence après une pluie',
-  'temps-sec': 'par temps sec',
-  chaleur: 'par fortes chaleurs (> 25 °C)',
-  'apres-recolte': 'après la récolte',
+  'hors-gel': "À faire seulement s'il ne gèle pas.",
+  'apres-pluie': 'Mieux vaut le faire après une pluie.',
+  'temps-sec': 'Choisissez un temps sec.',
+  chaleur: 'À faire par forte chaleur (plus de 25 °C).',
+  'apres-recolte': 'À faire après la récolte.',
 }
 
 const WEEKDAYS = ['dimanche', 'lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi']
@@ -105,8 +106,13 @@ function monthsLabel(months: Month[]): string {
   const ws = monthWindows(months)
   if (ws.length === 1 && ws[0].start === 1 && ws[0].end === 12) return "toute l'année"
   return ws
-    .map((w) => (w.start === w.end ? MONTH_NAMES[w.start - 1] : `${MONTH_NAMES[w.start - 1]} à ${MONTH_NAMES[w.end - 1]}`))
-    .join(' et ')
+    .map((w) => {
+      const span = ((w.end - w.start + 12) % 12) + 1
+      if (span === 1) return MONTH_NAMES[w.start - 1]
+      if (span === 2) return `${MONTH_NAMES[w.start - 1]} et ${MONTH_NAMES[w.end - 1]}`
+      return `de ${MONTH_NAMES[w.start - 1]} à ${MONTH_NAMES[w.end - 1]}`
+    })
+    .join(', puis ')
 }
 
 /** Clé de période d'une tâche saisonnière : année de début de la fenêtre (2026, ou 2026-09 s'il y a plusieurs fenêtres). */
@@ -388,11 +394,14 @@ function explicitRules(sp: Species, garden: Garden): RuleEntry[] {
 }
 
 /** Récolte en cours (ou à venir dans la fenêtre) : message de blocage pour `apres-recolte`. */
-function harvestBlock(recolte: Month[], month: Month): string | undefined {
+function harvestBlock(recolte: Month[], month: Month): { blockedBy: string; detail: string } | undefined {
   if (!recolte.includes(month)) return undefined
   const w = monthWindows(recolte).find((w) => (w.start <= w.end ? month >= w.start && month <= w.end : month >= w.start || month <= w.end))
   const end = w ? w.end : month
-  return `Récolte en cours (jusqu'en ${MONTH_NAMES[end - 1]}) : attendre la fin`
+  return {
+    blockedBy: 'Attendre : la récolte est en cours',
+    detail: `Récolte en cours jusqu'en ${MONTH_NAMES[end - 1]} : attendez la fin.`,
+  }
 }
 
 export function generateTasks(ctx: TaskContext): GeneratedTask[] {
@@ -468,7 +477,9 @@ export function generateTasks(ctx: TaskContext): GeneratedTask[] {
     })
     meteoWateringHidden = recentlyDone(base, 3)
     if (thirsty.length && !meteoWateringHidden) {
-      const deficit = `Déficit de ${fmt(balance.deficitMm)} mm sur 7 jours (pluie ${fmt(balance.rain7)} mm, évaporation ${fmt(balance.et07)} mm)`
+      const detail =
+        `Déficit en eau : ${fmt(balance.deficitMm)} mm sur 7 jours (pluie ${fmt(balance.rain7)} mm, évaporation ${fmt(balance.et07)} mm). ` +
+        `Pluie prévue sous 3 jours : ${fmt(balance.forecastRain3)} mm.`
       const plantIds = thirsty.map((p) => p.id)
       meteoWatering = {
         key: `${todayIso}:${base}`,
@@ -478,9 +489,10 @@ export function generateTasks(ctx: TaskContext): GeneratedTask[] {
         plantIds,
         priority: wateringPriority(plantIds),
         reason: heavyRain
-          ? `${deficit}, mais la pluie annoncée devrait suffire.`
-          : `${deficit} ; seulement ${fmt(balance.forecastRain3)} mm de pluie prévus sous 3 jours. Jeunes plantations et plantes gourmandes en eau d'abord.`,
-        ...(heavyRain ? { blockedBy: `Pluie abondante prévue (${fmt(balance.forecastRain3)} mm sous 3 jours) : inutile d'arroser` } : {}),
+          ? 'Pas assez de pluie ces 7 derniers jours, mais de la pluie arrive : inutile d\'arroser.'
+          : "Pas assez de pluie ces 7 derniers jours : arrosez les jeunes plantations et les plantes qui aiment l'eau.",
+        detail,
+        ...(heavyRain ? { blockedBy: 'Attendre : pluie prévue' } : {}),
       }
       tasks.push(meteoWatering)
     }
@@ -565,12 +577,12 @@ export function generateTasks(ctx: TaskContext): GeneratedTask[] {
 
     const key = `${prefix}:${base}:${tagsOf(todo).join('.')}`
     const monthsShown = entry.months
-    const parts = [`Fenêtre de ${TYPE_NOUN[rule.type]} : ${monthsLabel(monthsShown)}`]
-    if (rule.condition) parts.push(CONDITION_LABEL[rule.condition])
-    if (freq) parts.push(`tous les ${freq} jours`)
-    let reason = parts.join(', ') + '.'
+    let reason = `Bonne période pour ${TYPE_INFINITIVE[rule.type]} : ${monthsLabel(monthsShown)}.`
+    if (rule.condition) reason += ` ${CONDITION_LABEL[rule.condition]}`
+    if (freq) reason += ` À refaire tous les ${freq} jours.`
     let priority: GeneratedTask['priority'] = 'normale'
     let blockedBy: string | undefined
+    const details: string[] = []
 
     if (rule.type === 'traitement' && todo.some((p) => p.status === 'malade')) {
       priority = 'haute'
@@ -579,27 +591,35 @@ export function generateTasks(ctx: TaskContext): GeneratedTask[] {
 
     switch (rule.condition) {
       case 'hors-gel':
-        if (frostSoon) blockedBy = `Gel prévu ${dayLabel(frostSoon.date, todayIso)} (${fmtT(frostSoon.tMin)} °C) : attendre`
+        if (frostSoon) {
+          blockedBy = 'Attendre : risque de gel'
+          details.push(`Gel prévu ${dayLabel(frostSoon.date, todayIso)} (${fmtT(frostSoon.tMin)} °C).`)
+        }
         break
       case 'apres-pluie':
         if (wx) {
           if (rainPast3 >= 2) {
             priority = 'haute'
-            reason += ` Sol humide (${fmt(rainPast3)} mm ces 3 derniers jours) : désherbage facile.`
+            reason += ' Le sol est humide : désherbage facile.'
+            details.push(`Pluie des 3 derniers jours : ${fmt(rainPast3)} mm.`)
           } else {
-            reason += ' Sol sec, désherbage plus difficile.'
+            reason += ' Le sol est sec : désherbage plus difficile.'
           }
         }
         break
       case 'temps-sec':
-        if (rainNext2 > 1) blockedBy = `Pluie prévue sous 48 h (${fmt(rainNext2)} mm) : attendre un temps sec`
+        if (rainNext2 > 1) {
+          blockedBy = 'Attendre : pluie prévue'
+          details.push(`Pluie prévue sous 48 h : ${fmt(rainNext2)} mm.`)
+        }
         break
       case 'chaleur': {
         if (wx) {
           const hot = next3.find((d) => d.tMax > 25)
           if (!hot) continue // pas de chaleur prévue : rien à faire
           priority = 'haute'
-          reason += ` ${fmtT(hot.tMax)} °C prévus ${dayLabel(hot.date, todayIso)}.`
+          reason += ` Chaleur prévue ${dayLabel(hot.date, todayIso)}.`
+          details.push(`${fmtT(hot.tMax)} °C prévus ${dayLabel(hot.date, todayIso)}.`)
         } else {
           priority = 'basse'
         }
@@ -607,7 +627,13 @@ export function generateTasks(ctx: TaskContext): GeneratedTask[] {
       }
       case 'apres-recolte':
         // Faisable dans la fenêtre de la règle, hors des mois de récolte (sans mois de récolte : jamais bloquée).
-        blockedBy = harvestBlock(plantingCalendar(sp, garden).recolte, month)
+        {
+          const hb = harvestBlock(plantingCalendar(sp, garden).recolte, month)
+          if (hb) {
+            blockedBy = hb.blockedBy
+            details.push(hb.detail)
+          }
+        }
         break
       default:
         break
@@ -616,14 +642,20 @@ export function generateTasks(ctx: TaskContext): GeneratedTask[] {
     // Semis / plantation trop tôt pour les gelées locales.
     if (!blockedBy && entry.frostMonths.has(month)) {
       const gate = frostGate(sp, garden)
-      if (gate) blockedBy = `Dernières gelées vers le ${formatDoy(gate.lastFrostDoy)} : attendre ${MONTH_NAMES[gate.firstOk - 1]}`
+      if (gate) {
+        blockedBy = 'Attendre : risque de gel au printemps'
+        details.push(`Dernières gelées vers le ${formatDoy(gate.lastFrostDoy)} : attendez ${MONTH_NAMES[gate.firstOk - 1]}.`)
+      }
     }
 
     if (rule.type === 'arrosage' && balance && !blockedBy) {
-      if (heavyRain) blockedBy = `Pluie abondante prévue (${fmt(balance.forecastRain3)} mm sous 3 jours) : inutile d'arroser`
-      else if (balance.deficitMm <= 0) {
+      if (heavyRain) {
+        blockedBy = 'Attendre : pluie prévue'
+        details.push(`Pluie prévue sous 3 jours : ${fmt(balance.forecastRain3)} mm.`)
+      } else if (balance.deficitMm <= 0) {
         priority = 'basse'
-        reason += ` Pluie récente suffisante (${fmt(balance.rain7)} mm sur 7 jours).`
+        reason += ' Il a assez plu ces 7 derniers jours : arrosage peu utile.'
+        details.push(`Pluie des 7 derniers jours : ${fmt(balance.rain7)} mm.`)
       }
     }
     // Des arbres établis ne déclenchent jamais de priorité haute pour l'arrosage.
@@ -639,6 +671,7 @@ export function generateTasks(ctx: TaskContext): GeneratedTask[] {
       speciesId: sp.id,
       priority,
       reason,
+      ...(details.length ? { detail: details.join(' ') } : {}),
       ...(blockedBy ? { blockedBy } : {}),
     })
   }
