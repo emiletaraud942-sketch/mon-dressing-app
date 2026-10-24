@@ -200,3 +200,9 @@ Contenu illicite grave ou campagne d'abus : masquer en masse (`update public.pos
 12. Planifier `neighbors_purge_expired()` et `neighbors_orphan_photos()` chaque jour, et l'effacement des fichiers listés (voir « Entretien quotidien »).
 13. Créer une adresse de contact de signalement et la lire chaque jour pendant le lancement. Activer un CAPTCHA (Authentication > Attack Protection) avant l'ouverture publique.
 14. Après application de la migration sur le vrai projet : essai de bout en bout avec deux comptes de test (voir les scénarios de `supabase/neighbors/tests/scenarios.sql`), puis lancer le « Security Advisor » du tableau de bord.
+
+## Modération au quotidien (résumé)
+
+Tout est dans `supabase/neighbors/moderation.sql` (à copier dans Supabase › SQL Editor) : la liste des signalements à traiter, puis les requêtes pour masquer, rétablir, bannir et noter la décision dans `moderation_log`. À lire une fois par jour. Délais : contenu illicite évident sous 24 h, signalement ordinaire sous 7 jours, annonce masquée automatiquement relue sous 72 h.
+
+Nettoyage : une tâche `pg_cron` (`neighbors-purge-quotidienne`, 22 h UTC) exécute `neighbors_purge_expired()` chaque jour. Elle ne supprime pas les fichiers photo : lister avec `select * from public.neighbors_orphan_photos();` puis effacer à la main dans Storage › neighbors-photos.
