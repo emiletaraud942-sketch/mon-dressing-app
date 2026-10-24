@@ -1,10 +1,11 @@
 // Second client Supabase, ISOLÉ de la synchro privée (src/lib/sync.ts) : autre projet, autre clé de stockage.
-// Sans VITE_NEIGHBORS_SUPABASE_URL / VITE_NEIGHBORS_SUPABASE_PUBLIC_TOKEN (ou l'ancien VITE_NEIGHBORS_SUPABASE_ANON_KEY), la fonction est masquée et rien n'est chargé.
+// Sans URL ni clé publique (voir env.ts : NEIGHBORS_SUPABASE_URL / NEIGHBORS_SUPABASE_PUBLISHABLE), la fonction est masquée et rien n'est chargé.
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 import { fetchWithTimeout } from '../http'
+import { neighborsKey, neighborsUrl } from './env'
 
-const url = import.meta.env.VITE_NEIGHBORS_SUPABASE_URL as string | undefined
-const key = (import.meta.env.VITE_NEIGHBORS_SUPABASE_PUBLIC_TOKEN || import.meta.env.VITE_NEIGHBORS_SUPABASE_ANON_KEY) as string | undefined
+const url = neighborsUrl
+const key = neighborsKey
 
 /** Clé localStorage distincte de celle de la synchro. Elle commence par « sb- » : « Effacer mes données » la retire aussi. */
 export const NEIGHBORS_STORAGE_KEY = 'sb-neighbors-auth-token'

@@ -30,7 +30,10 @@ function manualChunks(id: string): string | undefined {
   return undefined
 }
 
+// Variables exposées au navigateur : VITE_* et NEIGHBORS_* (URL et clé publiques de l'entraide, sans mot « KEY » : Vercel le refuse).
+// Jamais de secret sous ces préfixes.
 export default defineConfig({
+  envPrefix: ['VITE_', 'NEIGHBORS_'],
   plugins: [
     react(),
     VitePWA({

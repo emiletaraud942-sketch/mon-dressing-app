@@ -90,6 +90,15 @@ describe('onglet Voisins (entraide)', () => {
     const { ui } = await load('#voisins')
     expect(ui.tabAvailable('voisins')).toBe(true)
   })
+  it('fonctionne aussi avec les noms sans VITE_ (NEIGHBORS_SUPABASE_URL / NEIGHBORS_SUPABASE_PUBLISHABLE)', async () => {
+    vi.stubEnv('VITE_NEIGHBORS_SUPABASE_URL', '')
+    vi.stubEnv('VITE_NEIGHBORS_SUPABASE_ANON_KEY', '')
+    vi.stubEnv('VITE_NEIGHBORS_SUPABASE_PUBLIC_TOKEN', '')
+    vi.stubEnv('NEIGHBORS_SUPABASE_URL', 'https://x.supabase.co')
+    vi.stubEnv('NEIGHBORS_SUPABASE_PUBLISHABLE', 'cle')
+    const { ui } = await load('#voisins')
+    expect(ui.tabAvailable('voisins')).toBe(true)
+  })
   it('présent quand configuré : #voisins et le retour #entraide ouvrent l’onglet, dans « Plus »', async () => {
     vi.stubEnv('VITE_NEIGHBORS_SUPABASE_URL', 'https://x.supabase.co')
     vi.stubEnv('VITE_NEIGHBORS_SUPABASE_ANON_KEY', 'cle')
